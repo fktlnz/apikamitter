@@ -5,14 +5,7 @@ use \Model\Db; //Dbモデルをインポート
 
 class Controller_Api extends Controller_Rest
 {
-    protected $format = 'json';
-    public function get_login()
-    {
-        return $this->response(array(
-            'IP-Address' => 'test',
-            'foo' => Input::get('foo')
-        ));
-    }
+    protected $format = 'json';    
 
 //========================フロントから下記apiにリクエストが来る=========================//
 
@@ -2949,215 +2942,99 @@ class Controller_Api extends Controller_Rest
 
             Log::debug('$obj@dofollw:'.print_r($obj,true));
             Log::debug('$header@dofollw:'.print_r($header,true));
-            if(empty($obj->errors)){ 
 
-                //フォロー済リストとしてDBに追加する                
-                $word_id = uniqid();//一意のIDを発行する
-                $type = 1;//0:ターゲットアカウント 1:フォロー済アカウント 2:アンフォローアカウント
-                $id = $u_info[0]['id'];
-                
-                try{
+            if($obj){
+
+                if(!empty($obj->users)){ 
+
+                    //フォロー済リストとしてDBに追加する                
+                    $word_id = uniqid();//一意のIDを発行する
+                    $type = 1;//0:ターゲットアカウント 1:フォロー済アカウント 2:アンフォローアカウント
                     $id = $u_info[0]['id'];
+                    
+                    try{
+                        $id = $u_info[0]['id'];
 
-                    $data = array();
-                    $data['id'] = $word_id;
-                    $data['account_id'] = $id;
-                    $data['screen_name'] = $username;
-                    $data['type'] = $type; //0:フォロワーサーチ 1:いいねキーワード
-                    $data['delete_flg'] = 0;
-                    $data['created_at'] = date('Y:m:d h:i:s');
+                        $data = array();
+                        $data['id'] = $word_id;
+                        $data['account_id'] = $id;
+                        $data['screen_name'] = $username;
+                        $data['type'] = $type; //0:フォロワーサーチ 1:いいねキーワード
+                        $data['delete_flg'] = 0;
+                        $data['created_at'] = date('Y:m:d h:i:s');
 
-                    $post = Model_Useraccount::forge();
-                    $post->set($data);
-                    $rst = $post->save();//ユーザーアカウントをDBに保存する
+                        $post = Model_Useraccount::forge();
+                        $post->set($data);
+                        $rst = $post->save();//ユーザーアカウントをDBに保存する
 
-                    if($rst){
-                        Log::debug('フォロー済リストに追加しました！');
+                        if($rst){
+                            Log::debug('フォロー済リストに追加しました！');
+                            return array(
+                                'res' => 'OK',
+                                'msg' => 'フォローに成功しました',
+                                'rst' => array(
+                                    'id' => $obj->id_str,
+                                    'name' => $obj->screen_name,
+                                    'text' => $obj->description,
+                                    'created_at' => $data['created_at']
+                                )
+                            );
+                        }else{
+                            Log::debug('フォロー済リストに追加できませんでした。。');
+                            return array(
+                                'res' => 'NG',
+                                'msg' => 'フォローに失敗しました',
+                                'rst' => array(
+                                    'id' => $obj->id_str,
+                                    'name' => $obj->screen_name,
+                                    'text' => $obj->description,
+                                    'created_at' => $data['created_at']
+                                )
+                            );
+                        }
+
+
+                    }catch(Exception $e) {
                         return array(
-                            'res' => 'OK',
-                            'msg' => 'フォローに成功しました',
-                            'rst' => array(
-                                'id' => $obj->id_str,
-                                'name' => $obj->screen_name,
-                                'text' => $obj->description,
-                                'created_at' => $data['created_at']
-                            )
+                            'res' => 'NG',
+                            'msg' => $e->getMessage(),
+                            'rst' => null
+                        );
+                    }            
+
+                }else{
+                    if($obj->errors[0]->code===161){
+                        //これ以上フォローできない状態
+                        //３時間以上あけないと解除されないみたいなのでメッセージをそれ用に変える
+                        return array(
+                            'res' => 'FOLLOWLIMIT',
+                            'msg' => 'これ以上フォローすることができません。３時間以上時間をおいてフォローを再開してください',
+                            'rst' => $obj
                         );
                     }else{
-                        Log::debug('フォロー済リストに追加できませんでした。。');
+                        Log::debug('$obj フォローに失敗=>:'.print_r($obj,true));
                         return array(
                             'res' => 'NG',
                             'msg' => 'フォローに失敗しました',
-                            'rst' => array(
-                                'id' => $obj->id_str,
-                                'name' => $obj->screen_name,
-                                'text' => $obj->description,
-                                'created_at' => $data['created_at']
-                            )
+                            'rst' => $obj
                         );
                     }
-
-
-                }catch(Exception $e) {
-                    return array(
-                        'res' => 'NG',
-                        'msg' => $e->getMessage(),
-                        'rst' => null
-                    );
-                }            
+                }  
 
             }else{
-                if($obj->errors[0]->code===161){
-                    //これ以上フォローできない状態
-                    //３時間以上あけないと解除されないみたいなのでメッセージをそれ用に変える
-                    return array(
-                        'res' => 'FOLLOWLIMIT',
-                        'msg' => 'これ以上フォローすることができません。３時間以上時間をおいてフォローを再開してください',
-                        'rst' => $obj
-                    );
-                }else{
-                    Log::debug('$obj フォローに失敗=>:'.print_r($obj,true));
-                    return array(
-                        'res' => 'NG',
-                        'msg' => 'フォローに失敗しました',
-                        'rst' => $obj
-                    );
-                }
-            }   
-
-        }
-
-    }
-
-
-    /**
-     * $usernameをフォローする
-     * 
-     * @param ユーザーごとの、残り使用可能回数を取得
-     * @return　json
-    **/
-    public function get_rate_limit_status()
-    {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
-        Log::debug('$u_id:'.print_r($u_id,true));
-        Log::debug('$screen_name:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
-            
-            $u_info = Db::get_userInfo($u_id, $screen_name);
-            Log::debug('$u_info:'.print_r($u_info,true));
-            if(!$u_info) return false;
-
-            // 設定
-            $api_key = 'PL2EEcGoYzjCRcfY8TA48wE1n' ;		// APIキー
-            $api_secret = 'o69dKBhGCNChijJM029NB30T2hp6zQXKpCZsYul6kAnMLlNGLA' ;		// APIシークレット
-            $access_token = $u_info[0]['access_token'];		// アクセストークン
-            $access_token_secret = $u_info[0]['access_token_secret'];		// アクセストークンシークレット
-            $request_url = 'https://api.twitter.com/1.1/application/rate_limit_status.json' ;		// エンドポイント
-            $request_method = 'GET' ;
-
-            // パラメータA (オプション)
-            $params_a = array(
-        //		"resources" => "statuses,users",
-            ) ;
-
-            // キーを作成する (URLエンコードする)
-            $signature_key = rawurlencode( $api_secret ) . '&' . rawurlencode( $access_token_secret ) ;
-
-            // パラメータB (署名の材料用)
-            $params_b = array(
-                'oauth_token' => $access_token ,
-                'oauth_consumer_key' => $api_key ,
-                'oauth_signature_method' => 'HMAC-SHA1' ,
-                'oauth_timestamp' => time() ,
-                'oauth_nonce' => microtime() ,
-                'oauth_version' => '1.0' ,
-            ) ;
-
-            // パラメータAとパラメータBを合成してパラメータCを作る
-            $params_c = array_merge( $params_a , $params_b ) ;
-
-            // 連想配列をアルファベット順に並び替える
-            ksort( $params_c ) ;
-
-            // パラメータの連想配列を[キー=値&キー=値...]の文字列に変換する
-            $request_params = http_build_query( $params_c , '' , '&' ) ;
-
-            // 一部の文字列をフォロー
-            $request_params = str_replace( array( '+' , '%7E' ) , array( '%20' , '~' ) , $request_params ) ;
-
-            // 変換した文字列をURLエンコードする
-            $request_params = rawurlencode( $request_params ) ;
-
-            // リクエストメソッドをURLエンコードする
-            // ここでは、URL末尾の[?]以下は付けないこと
-            $encoded_request_method = rawurlencode( $request_method ) ;
-        
-            // リクエストURLをURLエンコードする
-            $encoded_request_url = rawurlencode( $request_url ) ;
-        
-            // リクエストメソッド、リクエストURL、パラメータを[&]で繋ぐ
-            $signature_data = $encoded_request_method . '&' . $encoded_request_url . '&' . $request_params ;
-
-            // キー[$signature_key]とデータ[$signature_data]を利用して、HMAC-SHA1方式のハッシュ値に変換する
-            $hash = hash_hmac( 'sha1' , $signature_data , $signature_key , TRUE ) ;
-
-            // base64エンコードして、署名[$signature]が完成する
-            $signature = base64_encode( $hash ) ;
-
-            // パラメータの連想配列、[$params]に、作成した署名を加える
-            $params_c['oauth_signature'] = $signature ;
-
-            // パラメータの連想配列を[キー=値,キー=値,...]の文字列に変換する
-            $header_params = http_build_query( $params_c , '' , ',' ) ;
-
-            // リクエスト用のコンテキスト
-            $context = array(
-                'http' => array(
-                    'method' => $request_method , // リクエストメソッド
-                    'header' => array(			  // ヘッダー
-                        'Authorization: OAuth ' . $header_params ,
-                    ) ,
-                ) ,
-            ) ;
-
-            // パラメータがある場合、URLの末尾に追加
-            if( $params_a ) {
-                $request_url .= '?' . http_build_query( $params_a ) ;
+                //$objが空の場合
+                //１．アクセス制限である
+                //２．アカウントが非公開
+                //３．ネット環境が悪い
+                Log::debug('$objが空です！！フォローに失敗 =>:'.print_r($obj,true));
+                return array(
+                    'res' => 'NG',
+                    'msg' => 'フォローに失敗しました',
+                    'rst' => $obj
+                );
             }
+             
 
-            // オプションがある場合、コンテキストにPOSTフィールドを作成する (GETの場合は不要)
-        //	if( $params_a ) {
-        //		$context['http']['content'] = http_build_query( $params_a ) ;
-        //	}
-
-            // cURLを使ってリクエスト
-            $curl = curl_init() ;
-            curl_setopt( $curl, CURLOPT_URL , $request_url ) ;
-            curl_setopt( $curl, CURLOPT_HEADER, 1 ) ; 
-            curl_setopt( $curl, CURLOPT_CUSTOMREQUEST , $context['http']['method'] ) ;	// メソッド
-            curl_setopt( $curl, CURLOPT_SSL_VERIFYPEER , false ) ;	// 証明書の検証を行わない
-            curl_setopt( $curl, CURLOPT_RETURNTRANSFER , true ) ;	// curl_execの結果を文字列で返す
-            curl_setopt( $curl, CURLOPT_HTTPHEADER , $context['http']['header'] ) ;	// ヘッダー
-        //	if( isset( $context['http']['content'] ) && !empty( $context['http']['content'] ) ) {		// GETの場合は不要
-        //		curl_setopt( $curl , CURLOPT_POSTFIELDS , $context['http']['content'] ) ;	// リクエストボディ
-        //	}
-            curl_setopt( $curl , CURLOPT_TIMEOUT , 5 ) ;	// タイムアウトの秒数
-            $res1 = curl_exec( $curl ) ;
-            $res2 = curl_getinfo( $curl ) ;
-            curl_close( $curl ) ;
-
-            // 取得したデータ
-            $json = substr( $res1, $res2['header_size'] ) ;		// 取得したデータ(JSONなど)
-            $header = substr( $res1, 0, $res2['header_size'] ) ;	// レスポンスヘッダー (検証に利用したい場合にどうぞ)
-
-            // [cURL]ではなく、[file_get_contents()]を使うには下記の通りです…
-            // $json = file_get_contents( $request_url , false , stream_context_create( $context ) ) ;
-
-            // JSONをオブジェクトに変換
-            $obj = json_decode( $json ) ;
-            
-            Log::debug('rete_limit_status:'.print_r($header,true));
         }
 
     }
