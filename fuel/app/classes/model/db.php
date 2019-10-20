@@ -128,7 +128,7 @@ class Db extends \Model
     //ユーザーアカウントを削除する
     public static function delete_useraccount($word_id)
     {
-         return $query = \DB::update('useraccount')->value('delete_flg', 1)->where(array(
+         return $query = \DB::delete('useraccount')->where(array(
              'id' => $word_id
          ))->execute();
     }

@@ -496,21 +496,31 @@ class Controller_Api extends Controller_Rest
         $username = $_SESSION['active_user'];
         $twitter_profile = $this->getTwitterProfile($username);        
 
-        Log::debug('twitter_profile:'.print_r($twitter_profile,true));
-        if($twitter_profile){
+        Log::debug('twitter_profile:'.print_r($twitter_profile['rst'],true));
+        
+        if($twitter_profile !== null){
 
-            return $this->response(array(
-                'res' => 'OK',
-                'rst' => $twitter_profile,                
-            ));
+            if($twitter_profile['res']==='OK'){
+    
+                return $this->response(array(
+                    'res' => 'OK',
+                    'msg' => $twitter_profile['msg'],
+                    'rst' => $twitter_profile['rst']                
+                ));
+    
+            }else {
+    
+                return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => $twitter_profile['msg'],
+                    'rst' => $twitter_profile['rst']               
+                ));
+                
+            }
 
-        }else {
+        }else{
+            //APIでのアクセスに失敗した場合（null）
 
-            return $this->response(array(
-                'res' => 'NG',
-                'screen_name' => null,                
-            ));
-            
         }
     }
 
@@ -868,16 +878,36 @@ class Controller_Api extends Controller_Rest
                 
                 //いいねをつけるツイートIDの一覧を取得する
                 $tweetIdList_forLike = $this->getTweetIdList_forLike($account_id);
-                
+                Log::debug('count($tweetIdList_forLike):'.print_r(count($tweetIdList_forLike),true));
                 if(count($tweetIdList_forLike) > 0){          
 
                     $rst = $this->likeTweet($tweetIdList_forLike);
 
-                    return $this->response(array(
-                        'res' => 'OK',
-                        'msg' => 'test',
-                        'rst' => $rst
-                    ));
+                    if($rst !== null){
+                        if($rst !== false){
+                            return $this->response(array(
+                                'res' => 'OK',
+                                'msg' => 'いいねに成功',
+                                'rst' => $rst
+                            ));
+                        }else{
+                            //いいね対象リストは取得できたが、すでにいいね済などの理由からいいねができなかった場合、など
+                            //いいねの対象がなかった
+                            return $this->response(array(
+                                'res' => 'NG',
+                                'msg' => 'いいねの対象が見つかりませんでした',
+                                'rst' => false
+                            ));
+                        }
+
+                    }else{
+                        return $this->response(array(
+                            'res' => 'NG',
+                            'msg' => 'いいね制限あるいはネット環境が悪い可能性があります',
+                            'rst' => null
+                        ));
+                    }
+
                 }else{
                     return $this->response(array(
                         'res' => 'NG',
@@ -1531,11 +1561,19 @@ class Controller_Api extends Controller_Rest
 
             $rst = $this->checkUserAccountExist($username);
 
-            return $this->response(array(
-                'res' => 'OK',
-                'msg' => 'ユーザーアカウントのチェックが完了しました',
-                'rst' => $rst,                
-            ));
+            if($rst !== null){
+                return $this->response(array(
+                    'res' => 'OK',//取得成功
+                    'msg' => 'ユーザーアカウントのチェックが完了しました',
+                    'rst' => $rst,                
+                ));
+            }else{
+                return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => '非公開アカウントorアクセス制限orネット環境が悪い可能性があります',
+                    'rst' => null,                
+                ));
+            }
     
             
         }else {
@@ -1825,10 +1863,44 @@ class Controller_Api extends Controller_Rest
 
             // JSONをオブジェクトに変換
             $obj = json_decode( $json );
+
+            if($obj){
+                //$objが取得できた場合                
+                if(empty($obj->errors)){
+                    //正常に取得できた場合
+                    return array(
+                        'res' => 'OK',
+                        'msg' => 'プロフィールの取得に成功',
+                        'rst' => $obj
+                    );
+                }else{
+                    //$obj取得できたがエラーだった場合
+                    return array(
+                        'res' => 'NG',
+                        'msg' => 'プロフィールの取得に失敗',
+                        'rst' => false
+                    );
+                }
+
+            }else{
+                //$objが空の場合
+                //１．アクセス制限である
+                //２．アカウントが非公開
+                //３．ネット環境が悪い
+                return array(
+                    'res' => 'NG',
+                    'msg' => 'リクエストに失敗しました',
+                    'rst' => null
+                );
+            }
             
-            return $this->response($obj);
+            
         }else {
-            return false;
+            return array(
+                    'res' => 'NG',
+                    'msg' => 'アプリケーションエラー@プロフィール取得',
+                    'rst' => false
+                );
         }
     }
 
@@ -2070,30 +2142,51 @@ class Controller_Api extends Controller_Rest
 
             //returnするidlist
             $idlist=array();
-            
-            for($i=0; $i<count($obj->statuses);$i++){
-                $skip=false;
-                Log::debug('loop start');
-                Log::debug('ツイート文は:'.$obj->statuses[$i]->text);
-                if($notlikeword){
-                    //NOTlikeキーワードがある場合
-                    foreach($notlikeword as $key => $val){
-                        Log::debug('NOTキーワードは＝＞:'.print_r($val['word'],true));
-                        if ( strpos( $obj->statuses[$i]->text, $val['word'] ) !== false ){
-                            Log::debug('NOTキーワードが含まれてたよ'.$obj->statuses[$i]->text);
-                            $skip=true;
-                        }                        
-                    }
-                    //NOTキーワードを含んでいた場合はリストへの追加スキップ
-                    if($skip) continue;
-                    $idlist[] = strval($obj->statuses[$i]->id_str);
-                }else{
-                    //NOTlikeキーワードがない場合
-                    $idlist[] = strval($obj->statuses[$i]->id_str);
-                }
-            }
+            $empty_array=array();
+            if($obj){
 
-            return $idlist;
+                if(empty($obj->errors)){
+
+                    for($i=0; $i<count($obj->statuses);$i++){
+                        $skip=false;
+                        Log::debug('loop start');
+                        Log::debug('ツイート文は:'.$obj->statuses[$i]->text);
+                        if($notlikeword){
+                            //NOTlikeキーワードがある場合
+                            foreach($notlikeword as $key => $val){
+                                Log::debug('NOTキーワードは＝＞:'.print_r($val['word'],true));
+                                if ( strpos( $obj->statuses[$i]->text, $val['word'] ) !== false ){
+                                    Log::debug('NOTキーワードが含まれてたよ'.$obj->statuses[$i]->text);
+                                    $skip=true;
+                                }                        
+                            }
+                            //NOTキーワードを含んでいた場合はリストへの追加スキップ
+                            if($skip) continue;
+                            $idlist[] = strval($obj->statuses[$i]->id_str);
+                        }else{
+                            //NOTlikeキーワードがない場合
+                            $idlist[] = strval($obj->statuses[$i]->id_str);
+                        }
+                    }
+
+                    return $idlist;
+
+                }else{
+                    return $empty_array;
+
+                }
+
+                
+
+            }else{
+                //$objが空の場合
+                //１．アクセス制限である
+                //２．アカウントが非公開
+                //３．ネット環境が悪い
+                return $empty_array;
+            }
+            
+            
         }
     }
 
@@ -2107,6 +2200,7 @@ class Controller_Api extends Controller_Rest
     public function likeTweet($tweetIdList)
     {
         $json_collection = array();
+        $IsError=false;//objが取得できなかった場合：true 
         $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
         $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
 
@@ -2232,10 +2326,8 @@ class Controller_Api extends Controller_Rest
                 // JSONをオブジェクトに変換
                 $obj = json_decode( $json );
 
-                if(empty($obj)){
-                    //$objが空の場合は、
+                if($obj){
 
-                }else{
                     if(empty($obj->errors)){                    
                         Log::debug('$obj:'.print_r($obj,true));
                         $json_rtn['id'] = $obj->id_str;
@@ -2249,8 +2341,17 @@ class Controller_Api extends Controller_Rest
     
                     }else{
                         Log::debug('いいね！に失敗しました=>:'.print_r($obj->errors,true));
-                    }                
+                    }    
 
+                }else{
+                    //$objが空の場合
+                    //１．アクセス制限である
+                    //２．アカウントが非公開
+                    //３．ネット環境が悪い
+
+                    //$json_collectionが空の場合にアクセス制限、ネット環境悪い可能性があるとメッセージする
+                    $IsError=true;
+                    
                 }
 
             }
@@ -2286,12 +2387,14 @@ class Controller_Api extends Controller_Rest
                 return $json_collection;
 
             }else{
-                //$json_collectionが空の場合は制限に引っかかっている可能性が高い
-                return null;
-
+                if($IsError){
+                    //$json_collectionが空の場合は制限に引っかかっている可能性が高い
+                    return null;
+                }
+                return false;
             }
             
-        }
+        }        
 
     }
 
@@ -2427,14 +2530,20 @@ class Controller_Api extends Controller_Rest
             // JSONをオブジェクトに変換
             $obj = json_decode( $json );
 
-            Log::debug('$obj:'.print_r($obj,true));
-            if(empty($obj->errors)){                    
-                Log::debug('$obj アカウントが存在しました:'.print_r($obj,true));
-                return true;
+            if($obj){
+                Log::debug('$obj:'.print_r($obj,true));
+                if(empty($obj->errors)){                    
+                    Log::debug('$obj アカウントが存在しました:'.print_r($obj,true));
+                    return true;
+                }else{
+                    Log::debug('$obj アカウントが存在しませんでした=>:'.print_r($obj,true));
+                    return false;
+                }  
             }else{
-                Log::debug('$obj アカウントが存在しませんでした=>:'.print_r($obj,true));
-                return false;
-            }        
+                //非公開アカウントorアクセス制限orネット環境が悪い可能性があります
+                return null;
+            }
+                  
         }
 
     }
