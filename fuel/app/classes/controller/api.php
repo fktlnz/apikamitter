@@ -193,10 +193,11 @@ class Controller_Api extends Controller_Rest
         Log::debug('（パスワードリマインダー）認証キーを送信します->'.print_r(Input::post("email"), true));
         $email = Input::post("email");
         $rst_email = Db::chk_emailExist($email);
-        Log::debug('email存在確認結果->'.print_r($rst, true));
+        Log::debug('email存在確認結果->'.print_r($rst_email, true));
 
         $username = Input::post("username");
         $rst_username = Db::chk_usernameExist($username);
+        Log::debug('username存在確認結果->'.print_r($rst_username, true));
 
         if($rst_email && $rst_username){
 

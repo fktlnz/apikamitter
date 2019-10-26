@@ -10,7 +10,7 @@ class Db extends \Model
     public static function chk_emailExist($email=null)
     {
         try{
-            return $query = \DB::count_records('users')->where(array(
+            return $query = \DB::select(\DB::expr('COUNT(*) as count'))->from('users')->where(array(
                 'email' => $email,
             ));
         }catch(Exception $e) {
@@ -21,9 +21,9 @@ class Db extends \Model
     public static function chk_usernameExist($username=null)
     {
         try{
-            return $query = \DB::count_records('users')->where(array(
+            return $query = \DB::select(\DB::expr('COUNT(*) as count'))->from('users')->where(array(
                 'username' => $username,
-            ));
+            ));           
         }catch(Exception $e) {
             return false;
         }        
