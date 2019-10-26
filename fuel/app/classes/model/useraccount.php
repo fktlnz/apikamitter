@@ -12,6 +12,10 @@ class Model_Useraccount extends \Orm\Model {
             'data_type'  => 'varchar',
             'label'      => 'ターゲットアカウントID',
         ),
+        'text' => array(
+            'data_type'  => 'varchar',
+            'label'      => 'プロフィール内容',
+        ),
         'type' => array(
             'data_type'  => 'int',
             'label'      => 'ユーザーアカウントタイプ（0:ターゲットアカウント 1:フォロー済アカウント　2:アンフォローアカウント）',

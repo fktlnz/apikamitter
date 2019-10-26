@@ -4,6 +4,31 @@ namespace Model;
 
 class Db extends \Model
 {
+    ////======パスワードリマインダー==========/////
+
+    //emailアドレスの登録があるか確認する
+    public static function chk_emailExist($email=null)
+    {
+        try{
+            return $query = \DB::count_records('users')->where(array(
+                'email' => $email,
+            ));
+        }catch(Exception $e) {
+            return false;
+        }        
+    }
+    //usernameの登録があるか確認する
+    public static function chk_usernameExist($username=null)
+    {
+        try{
+            return $query = \DB::count_records('users')->where(array(
+                'username' => $username,
+            ));
+        }catch(Exception $e) {
+            return false;
+        }        
+    }
+
     // スクリーンネームを取得する
     public static function get_screenName($u_id=null)
     {
@@ -68,6 +93,13 @@ class Db extends \Model
 
     }
 
+    public static function delete_tweetschedule($word_id)
+    {
+         return $query = \DB::update('schedule')->value('delete_flg', 1)->where(array(
+             'id' => $word_id,
+         ))->execute();
+    }
+
     //キーワードを取得する
     public static function get_keyword($account_id=null, $type=null) //type 0:フォロワーサーチキーワード　1:いいねキーワード
 
@@ -112,14 +144,49 @@ class Db extends \Model
     ==========================================================================================*/
 
     //ユーザーアカウントを取得する
-    public static function get_useraccount($account_id=null, $type=null)
+    public static function get_useraccount($account_id, $type, $datefilter=false, $flag=null)
     {
         try{
-            return $query = \DB::select('id', 'screen_name')->from('useraccount')->where(array(
-                'account_id' => $account_id,
-                'type' => $type,
-                'delete_flg' => 0
-            ))->execute()->as_array();
+            if($datefilter !== false && $flag !== null){                
+                
+                if($flag){
+                    //$datefilter日以内のデータを取得
+                    return $query = \DB::select('id', 'screen_name')->from('useraccount')->where(array(
+                        'account_id' => $account_id,
+                        'type' => $type,
+                        'delete_flg' => 0
+                    ))->and_where('created_at','>',$datefilter)->execute()->as_array();
+
+                }else{
+                    //$datefilter日経過したデータを取得
+                    return $query = \DB::select('id', 'screen_name')->from('useraccount')->where(array(
+                        'account_id' => $account_id,
+                        'type' => $type,
+                        'delete_flg' => 0
+                    ))->and_where('created_at','<',$datefilter)->execute()->as_array();
+                }
+                
+            }else{
+                //日付が新しいもの順に取得する
+                return $query = \DB::select('id', 'screen_name', 'text', 'created_at')->from('useraccount')->where(array(
+                    'account_id' => $account_id,
+                    'type' => $type,
+                    'delete_flg' => 0
+                ))->order_by('created_at', 'desc')->execute()->as_array();
+            }
+        }catch(Exception $e) {
+            return false;
+        }
+    }
+    //ユーザーアカウントを取得する
+    //$account_idユーザーにおいてaccountテーブルに登録された$screen_nameアカウントのtypeを$typeに変更する
+    public static function change_useraccountType($account_id, $screen_name, $type)
+    {
+        try{
+            return $query = \DB::update('useraccount')->value('type', $type)->where(array(
+                'screen_name' => $screen_name
+            ))->execute();
+            
         }catch(Exception $e) {
             return false;
         }
@@ -131,55 +198,11 @@ class Db extends \Model
          return $query = \DB::delete('useraccount')->where(array(
              'id' => $word_id
          ))->execute();
-    }
-
-    
+    }    
 
     public static function get_votes()
     {
          return $query = \DB::select('vote_a', 'vote_b','vote_c','vote_d')->from('vote')->execute()->as_array();         
-    }
-
-    public static function update_votes($select=null)
-    {
-        /*
-        * 選択肢Aを＋１⇒$select='vote_a'
-        * 選択肢Bを＋１⇒$select='vote_b'
-        * 選択肢Cを＋１⇒$select='vote_c'
-        * 選択肢Dを＋１⇒$select='vote_d'
-        */
-        switch($select) {
-            case 'vote_a':
-                $query = \DB::query('UPDATE vote SET vote_a=vote_a+1');
-                $query->execute();
-            break;
-            case 'vote_b':
-                $query = \DB::query('UPDATE vote SET vote_b=vote_b+1');
-                $query->execute();
-            break;
-            case 'vote_c':
-                $query = \DB::query('UPDATE vote SET vote_c=vote_c+1');
-                $query->execute();
-            break;
-            case 'vote_d':
-                $query = \DB::query('UPDATE vote SET vote_d=vote_d+1');
-                $query->execute();
-            break;
-            default:
-            break;
-        }
-
-         
-    }
-
-    public static function clear_votes()
-    {
-         $query = \DB::update('vote')->set(array(
-             'vote_a' => 0,
-             'vote_b' => 0,
-             'vote_c' => 0,
-             'vote_d' => 0
-         ))->execute();
     }
 
 }
