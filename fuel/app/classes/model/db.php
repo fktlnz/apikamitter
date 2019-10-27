@@ -12,7 +12,7 @@ class Db extends \Model
         try{
             return $query = \DB::select(\DB::expr('COUNT(*) as count'))->from('users')->where(array(
                 'email' => $email,
-            ));
+            ))->execute()->current();
         }catch(Exception $e) {
             return false;
         }        
@@ -23,7 +23,7 @@ class Db extends \Model
         try{
             return $query = \DB::select(\DB::expr('COUNT(*) as count'))->from('users')->where(array(
                 'username' => $username,
-            ));           
+            ))->execute()->current();           
         }catch(Exception $e) {
             return false;
         }        

@@ -193,11 +193,11 @@ class Controller_Api extends Controller_Rest
         Log::debug('（パスワードリマインダー）認証キーを送信します->'.print_r(Input::post("email"), true));
         $email = Input::post("email");
         $rst_email = Db::chk_emailExist($email);
-        Log::debug('email存在確認結果->'.print_r($rst_email, true));
+        Log::debug('email存在確認結果->'.print_r($rst_email['count'], true));
 
         $username = Input::post("username");
         $rst_username = Db::chk_usernameExist($username);
-        Log::debug('username存在確認結果->'.print_r($rst_username, true));
+        Log::debug('username存在確認結果->'.print_r($rst_username['count'], true));        
 
         if($rst_email && $rst_username){
 
@@ -238,7 +238,7 @@ EOT;
 
                 //認証に必要な情報をセッションへ保存
                 Session::set('auth_key', $auth_key);
-                Session::set('auth_email', $auth_key);
+                Session::set('auth_email', $mailto);
                 Session::set('auth_key_limit', time()+(60*30));//認証コードの有効時間を30分とする
                 return $this->response(array(
                     'res' => 'OK',
@@ -303,9 +303,10 @@ EOT;
         $username = Session::get('username');
         $update_pass = Auth::reset_password($username);
         Log::debug('新しいパスワードを発行しました->'.print_r($update_pass, true));
-
+        
         // メール情報
         $mailto = Session::get('auth_email'); // 宛先のメールアドレス
+        Log::debug('$mailto'.print_r($mailto, true));
         $subject = "【パスワード再発行完了】｜神ったー";
         $mailfrom = "From:webukatsutest@service-1.masashisite.com"; // From:送信元のメールアドレス(サーバパネルで設定したやつ)
         $content = <<<EOT
@@ -362,7 +363,7 @@ EOT;
     {
         $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJLKMNOPQRSTUVWXYZ0123456789';
         $str = '';
-        for ($i = 0; $i < $length; ++$i) {
+        for ($i = 0; $i < 15; ++$i) {
             $str .= $chars[mt_rand(0, 61)];
         }
         return $str;
@@ -381,7 +382,7 @@ EOT;
         //設定項目
         $api_key = "PL2EEcGoYzjCRcfY8TA48wE1n"; //API Key
         $api_secret="o69dKBhGCNChijJM029NB30T2hp6zQXKpCZsYul6kAnMLlNGLA"; //API Secret
-        $callback_url="http://192.168.11.6:3000/#/home"; //Callback URL 
+        $callback_url="http://service-1.masashisite.com/#/home"; //Callback URL 
 
         //レスポンスする連想配列
         $json = array(
@@ -972,9 +973,9 @@ EOT;
     public function get_gettweetschedule()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        
+        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : 0;
+        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : 0;
+        Log::debug('予約ツイート取得:'.print_r($screen_name,true));
         if($u_id && $screen_name){   
             try{
                 //アカウント情報を取得する(idを使う)
@@ -990,7 +991,7 @@ EOT;
                     ));
                 }else{
                     return $this->response(array(
-                        'res' => 'OK',
+                        'res' => 'NG',
                         'msg' => 'サーバーエラー',
                         'rst' => $rst
                     ));
