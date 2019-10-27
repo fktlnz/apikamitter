@@ -3,6 +3,17 @@
 
 use \Model\Db; //Dbモデルをインポート
 
+ class MAILTYPE {
+    const FINISH_AUTOFOLLOW             = 0; // 自動フォロー完了メール
+    const FINISH_AUTOLIKE               = 1; // 自動いいね完了メール
+    const FINISH_AUTOUNFOLLOW           = 2; // 自動アンフォロー完了メール
+    const ERROR_REQUEST_AUTOFOLLOW      = 3; // リクエスト上限（自動フォロー）
+    const ERROR_REQUEST_AUTOLIKE        = 4; // リクエスト上限（自動いいね）
+    const ERROR_REQUEST_AUTOUNFOLLOW    = 5; // リクエスト上限（自動アンフォロー）
+    const ERROR_SPAM_DETECTED           = 6; // スパム検知メール
+}
+
+
 class Controller_Api extends Controller_Rest
 {
     protected $format = 'json';
@@ -149,6 +160,7 @@ class Controller_Api extends Controller_Rest
                         $_SESSION["user_id"] = Auth::get('id');
 
                         Session::set("unfollow_type", true);//アンフォローするとき、非アクティブユーザーのフォロー解除するか、フォローバックしていないユーザーをフォロー解除するか
+                        Session::set("mail_status", '0');//デフォルトはメール配信しない、とする
 
                         $json['res']='OK';
                         return $this->response($json);
@@ -199,7 +211,7 @@ class Controller_Api extends Controller_Rest
         $rst_username = Db::chk_usernameExist($username);
         Log::debug('username存在確認結果->'.print_r($rst_username['count'], true));        
 
-        if($rst_email && $rst_username){
+        if($rst_email['count'] && $rst_username['count']){
 
             //セッションにユーザー名を格納しておく
             Session::set('username', $username);
@@ -379,6 +391,7 @@ EOT;
     **/
     public function get_certify()
     {
+        session_start();        
         //設定項目
         $api_key = "PL2EEcGoYzjCRcfY8TA48wE1n"; //API Key
         $api_secret="o69dKBhGCNChijJM029NB30T2hp6zQXKpCZsYul6kAnMLlNGLA"; //API Secret
@@ -391,6 +404,16 @@ EOT;
             'screen_name' => ''
         );
         Log::debug('get_certifyには来てる');
+
+        //認証しているアカウントの数を取得
+        //10人超えている場合はNG
+        $u_id = $_SESSION["user_id"];
+        $rst_myaccountNum = Db::get_myaccountnum($u_id);
+        Log::debug('認証アカウント数->'.print_r($rst_myaccountNum['count'], true));
+        if($rst_myaccountNum['count'] > 10) {
+            $json['msg']='認証できるのは10個までです';
+            return $this->response($json);
+        }
         
         if(isset($_GET['oauth_token']) && isset($_GET['oauth_verifier'])){
             Log::debug('oauth_token:'.$_GET['oauth_token']);
@@ -400,7 +423,6 @@ EOT;
             /*** [手順5] [手順5] アクセストークンを取得する ***/
 
             //[リクエストトークン・シークレット]をセッションから呼び出す
-            session_start() ;
             $request_token_secret = $_SESSION["oauth_token_secret"];
             Log::debug('セッションに保存した$_SESSION["oauth_token_secret"] :'.print_r($_SESSION["oauth_token_secret"] , true));
             
@@ -637,7 +659,7 @@ EOT;
             parse_str( $response, $query );
     
             // セッション[$_SESSION["oauth_token_secret"]]に[oauth_token_secret]を保存する
-            session_start() ;
+            // session_start() ;
             session_regenerate_id( true ) ;
             $_SESSION["oauth_token_secret"] = $query["oauth_token_secret"];
     
@@ -1068,7 +1090,7 @@ EOT;
     {        
         session_start();
         $json_collection_liked_list = Session::get('json_collection_liked_list');
-        Log::debug('json_collection_liked_list:'.print_r($json_collection_liked_list,true));
+        //Log::debug('json_collection_liked_list:'.print_r($json_collection_liked_list,true));
         if($json_collection_liked_list !== null) {
             return $this->response(array(
                         'res' => 'OK',
@@ -1241,11 +1263,30 @@ EOT;
 
                     if($rst !== null){
                         if($rst !== false){
+
+                            //自動いいね完了メール
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::FINISH_AUTOLIKE);
+                            }
+                            
                             return $this->response(array(
                                 'res' => 'OK',
                                 'msg' => 'いいねに成功',
                                 'rst' => $rst
                             ));
+
+                        }else if($rst === 'SPAM'){
+                            //スパム検知
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_SPAM_DETECTED);
+                            }
+                            
+                            return $this->response(array(
+                                'res' => 'OK',
+                                'msg' => 'いいねに成功',
+                                'rst' => $rst
+                            ));
+
                         }else{
                             //いいね対象リストは取得できたが、すでにいいね済などの理由からいいねができなかった場合、など
                             //いいねの対象がなかった
@@ -1334,6 +1375,8 @@ EOT;
 
                 //フォロー済アカウントを取得しておく（フォロー済であるアカウント(30日以内にフォロー)をフォロワーターゲットリストから除外するため）
                 $AlreadyFollowList = $this->getUseraccountArray($account_id, 1, 30, true);//type 1:フォロー済アカウント　30日以内に限定
+                //フォロー解除済アカウントを取得しておく（フォロー解除済であるアカウントをフォロワーターゲットリストから除外するため）
+                $AlreadyUnFollowList = $this->getUseraccountArray($account_id, 2);//type 2:フォロー済アカウント　すべて取得
                 
                 //フォローした結果を格納する変数
                 // [{
@@ -1389,19 +1432,19 @@ EOT;
                                 foreach($val_array as $key => $val){
                                     //すでにフォロー済である場合は除外する
                                     if(!in_array($val->screen_name, $AlreadyFollowList)){
-        
-                                        //取得したフォロワーリストを絞る
-                                        //フォロワーサーチキーワードがプロフに含まれる場合にフォロー対象にする
-                                        $IsFollowTarget = $this->checkFollowTarget($val->description, $search_keyword);
-                                        Log::debug('フォロワーチェックした結果:'.print_r($IsFollowTarget,true));
-                                        Log::debug('プロフ内容:'.print_r($val->description,true));
-            
-                                        //アンフォローリストにあるか確認する
-            
-            
-                                        if($IsFollowTarget){
-                                            array_push($follower_list, $val->screen_name);
-                                        }
+                                        if(!in_array($val->screen_name, $AlreadyUnFollowList)){
+                                            //取得したフォロワーリストを絞る
+                                            //フォロワーサーチキーワードがプロフに含まれる場合にフォロー対象にする
+                                            $IsFollowTarget = $this->checkFollowTarget($val->description, $search_keyword);
+                                            Log::debug('フォロワーチェックした結果:'.print_r($IsFollowTarget,true));
+                                            Log::debug('プロフ内容:'.print_r($val->description,true));
+                
+                                            if($IsFollowTarget){
+                                                array_push($follower_list, $val->screen_name);
+                                            }
+                                        }else{
+                                            Log::debug('すでにアンフォロー済です'.print_r($val->screen_name,true));
+                                        }        
                                     }else{
                                         Log::debug('すでにフォロー済です'.print_r($val->screen_name,true));
                                     }
@@ -1464,12 +1507,32 @@ EOT;
                             Session::set("follower_list_skip_num", $follower_list_skip_num);
                             $_SESSION['skip_num'] = $key_num;
 
+                            //メール配信（フォローリミット）
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOFOLLOW);
+                            }
+
                             return $this->response(array(
                                'res' => 'FOLLOWLIMIT',
                                'msg' => 'フォロー制限のため少し時間をおいてフォローを再開します',
                                'rst' => $followResult_Collection //$followResult_Collection_mergedにするとフロントかえってきたときにIDが重複するためとりあえずこっち
                             ));                            
 
+                        }else if($dfresult['res']==='SPAM'){
+
+                            Log::debug('!!!!SPAM判定されました!!!'); 
+                            //スパム検知メール
+                            //アカウントが停止するため、解除するよう促す
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_SPAM_DETECTED);
+                            }
+
+                            return $this->response(array(
+                                'res' => 'SPAM',
+                                'msg' => 'アカウントが一時停止されました。https://twitter.com にログインしてロック解除してください。',
+                                'rst' => false
+                            ));
+                            
                         }else if($result["res"] ==='LIMIT'){
                             //getFollower内でフォロワー取得上限に達した場合は、再開したときに途中から始められるように
                             //1.スキップする回数 2.next_cursorを保持する
@@ -1477,6 +1540,12 @@ EOT;
                             Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
                             $_SESSION['skip_num'] = $key_num;
+
+                            //メール配信（フォロワー取得リミット）
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOFOLLOW);
+                            }
+
                             //リクエスト上限に達した場合
                             return $this->response(array(
                                'res' => 'LIMIT',
@@ -1509,16 +1578,26 @@ EOT;
                         continue;
                     }else if($result["res"] === 'SPAM'){
                         Log::debug('!!!!SPAM判定されました!!!'); 
+
+                        //スパム検知メール
+                        //アカウントが停止するため、解除するよう促す
+                        if(Session::get('mail_status') === '1'){
+                            $this->mailTo(MAILTYPE::ERROR_SPAM_DETECTED);
+                        }
+
                         return $this->response(array(
                             'res' => 'SPAM',
                             'msg' => 'アカウントが一時停止されました。https://twitter.com にログインしてロック解除してください。',
                             'rst' => false
                         ));
                     
-                    }else{    
+                    }else{
+                        //ループが何周目か保持して、フロントに返す
+                        //15分後もういちど入ってくる
+                        $_SESSION['skip_num'] = $key_num;
                         return $this->response(array(
                             'res' => 'NG',
-                            'msg' => 'エラーが発生しました',
+                            'msg' => 'エラーが発生しました。15分後に再開します。',
                             'rst' => false
                         ));
                     }
@@ -1534,6 +1613,12 @@ EOT;
                     //ターゲットアカウントのフォロワー次ページがない＋アカウントすべてのループが完了している
                     Session::delete("next_cursor");
                     Session::delete("skip_num");
+                   
+                    //自動フォロー完了メール
+                    if(Session::get('mail_status') === '1'){
+                        $this->mailTo(MAILTYPE::FINISH_AUTOFOLLOW);
+                    }
+
                     return $this->response(array(
                         'res' => 'OK',
                         'msg' => '自動フォロー完了！',
@@ -2046,6 +2131,12 @@ EOT;
                                 //次回続きから取得できるようにセッションにページ情報を格納しておく
                                 $_SESSION['skip_num_unf'] = $key_num;
                                 $_SESSION['UnFollowPotentialList'] = $AlreadyFollowList_pure_array;
+
+                                //自動アンフォロー制限メール
+                                if(Session::get('mail_status') === '1'){
+                                    $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW);
+                                }
+
                                 return $this->response(array(
                                     'res' => 'FOLLOWLIMIT',
                                     'msg' => 'フォロー制限のため少し時間をおいてフォローを再開します',
@@ -2071,11 +2162,21 @@ EOT;
                                 //DBのuseraccountテーブルの該当アカウントのtypeをアンフォローにする
                                 Db::change_useraccountType($account_id, $val, 2);
                             }else if($ufresult['res']==='UNFOLLOWLIMIT'){
+
+                                 //自動アンフォロー制限メール
+                                if(Session::get('mail_status') === '1'){
+                                    $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW);
+                                }
+
                                 return $this->response(array(
                                     'res' => 'FOLLOWLIMIT',
                                     'msg' => 'フォロー制限のため少し時間をおいてフォローを再開します',
                                     'rst' => $UnfollowResult_Collection //$followResult_Collection_mergedにするとフロントかえってきたときにIDが重複するためとりあえずこっち
                                 ));
+                            }
+                             //自動アンフォロー制限メール
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW);
                             }
 
                             return $this->response(array(
@@ -2095,6 +2196,12 @@ EOT;
                             $_SESSION['UnFollowPotentialList'] = $AlreadyFollowList_pure_array;
 
                             Log::debug('!!!!SPAM判定されました!!!'); 
+
+                            //自動アンフォロー制限メール
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_SPAM_DETECTED);
+                            }
+
                             return $this->response(array(
                                 'res' => 'SPAM',
                                 'msg' => 'アカウントが一時停止されました。https://twitter.com にログインしてロック解除してください。',
@@ -2115,6 +2222,11 @@ EOT;
                     Session::delete("skip_num_unf");
                     Session::delete("UnFollowPotentialList");
                     Session::set("unfollow_type", false);
+
+                    //自動アンフォロー完了メール
+                    if(Session::get('mail_status') === '1'){
+                        $this->mailTo(MAILTYPE::FINISH_AUTOUNFOLLOW);
+                    }
 
                     return $this->response(array(
                         'res' => 'OK',
@@ -2193,6 +2305,12 @@ EOT;
                                 //次回続きから取得できるようにセッションにページ情報を格納しておく
                                 $_SESSION['skip_num_unf'] = $key_num;
                                 $_SESSION['UnFollowPotentialList'] = $WillUnfollowList;
+
+                                //自動アンフォロー完了メール
+                                if(Session::get('mail_status') === '1'){
+                                    $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW);
+                                }
+
                                 return $this->response(array(
                                     'res' => 'FOLLOWLIMIT',
                                     'msg' => 'フォロー制限のため少し時間をおいてフォローを再開します',
@@ -2218,11 +2336,22 @@ EOT;
                                 //DBのuseraccountテーブルの該当アカウントのtypeをアンフォローにする
                                 Db::change_useraccountType($account_id, $val, 2);
                             }else if($ufresult['res']==='UNFOLLOWLIMIT'){
+
+                                //自動アンフォロー制限メール
+                                if(Session::get('mail_status') === '1'){
+                                    $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW);
+                                }
+
                                 return $this->response(array(
                                     'res' => 'FOLLOWLIMIT',
                                     'msg' => 'フォロー制限のため少し時間をおいてフォローを再開します',
                                     'rst' => $UnfollowResult_Collection //$followResult_Collection_mergedにするとフロントかえってきたときにIDが重複するためとりあえずこっち
                                 ));
+                            }
+
+                            //自動アンフォロー制限メール
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW);
                             }
     
                             return $this->response(array(
@@ -2240,6 +2369,12 @@ EOT;
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
                             $_SESSION['skip_num_unf'] = $key_num;
                             $_SESSION['UnFollowPotentialList'] = $WillUnfollowList;
+
+                            //スパム判定メール
+                            //アカウント停止されるため、解除を促す
+                            if(Session::get('mail_status') === '1'){
+                                $this->mailTo(MAILTYPE::ERROR_SPAM_DETECTED);
+                            }
     
                             Log::debug('!!!!SPAM判定されました!!!'); 
                             return $this->response(array(
@@ -2260,6 +2395,11 @@ EOT;
                     Session::delete("skip_num_unf");
                     Session::delete("UnFollowPotentialList");
                     Session::set("unfollow_type", true);
+
+                    //自動アンフォロー完了メール
+                    if(Session::get('mail_status') === '1'){
+                        $this->mailTo(MAILTYPE::FINISH_AUTOUNFOLLOW);
+                    }
 
                     return $this->response(array(
                         'res' => 'OK',
@@ -2313,6 +2453,7 @@ EOT;
         Session::delete('json_collection_liked_list');
         Session::delete('follower_list');
         Session::delete('follower_list_skip_num');
+        Session::delete('mail_status');
 
         // logout        
         $auth = Auth::instance();
@@ -2329,6 +2470,28 @@ EOT;
                     'msg' => 'ログアウトに失敗しました。ネット環境を確認してください。',
                 ));
         }
+    }
+
+    /**
+     * メール配信状態をセッションに格納する
+     * 
+     * @param status(true:配信する　false:配信しない)
+     * @return　成功:true 　失敗：false
+    **/
+    public function get_changemailstatus()
+    {
+        session_start();
+        $status = Input::get('status');
+        if($status !== null){
+            Log::debug('今のメール配信状態＝＞'.print_r(Session::get('mail_status'),true));
+            Session::set('mail_status', $status);
+            Log::debug('変更後のメール配信状態＝＞'.print_r(Session::get('mail_status'),true));
+            return true;
+        }else{
+            Log::debug('メール配信状態の変更に失敗しました');
+            return false;
+        }
+        
     }
     
     
@@ -3087,24 +3250,34 @@ EOT;
                 // 取得したデータ
                 $json = substr( $res1, $res2['header_size'] ) ;	// 取得したデータ(JSONなど)
                 // JSONをオブジェクトに変換
-                $obj = json_decode( $json );
+                $obj = json_decode( $json );           
+                //Log::debug('$obj:'.print_r($obj,true));  
 
                 if($obj){
+                    if(empty($obg->error)){
+                        if(empty($obj->errors)){
+                            $json_rtn['id'] = $obj->id_str;
+                            $json_rtn['name'] = $obj->user->screen_name;
+                            $json_rtn['created_at'] = $obj->created_at;
+                            $json_rtn['text'] = $obj->text;
 
-                    if(empty($obj->errors)){                    
-                        Log::debug('$obj:'.print_r($obj,true));
-                        $json_rtn['id'] = $obj->id_str;
-                        $json_rtn['name'] = $obj->user->screen_name;
-                        $json_rtn['created_at'] = $obj->created_at;
-                        $json_rtn['text'] = $obj->text;
-    
-    
-                        Log::debug('$json_rtn:'.print_r($json_rtn,true));
-                        $json_collection[]=$json_rtn;
-    
-                    }else{
-                        Log::debug('いいね！に失敗しました=>:'.print_r($obj->errors,true));
-                    }    
+                            //Log::debug('$json_rtn:'.print_r($json_rtn,true));
+                            $json_collection[]=$json_rtn;
+        
+                        }else{
+                            Log::debug('いいね！に失敗しました=>:'.print_r($obj->errors,true));
+
+                            if(!empty($obj->errors[0]->code)){
+                                switch($obj->errors[0]->code){    
+                                    //SPAMから守るためにアカウントを一時停止した
+                                    case 326:
+                                        return 'SPAM';
+                                        break;
+                                }
+                            }
+                        }
+                        
+                    }                    
 
                 }else{
                     //$objが空の場合
@@ -3126,24 +3299,24 @@ EOT;
         $json_collection_liked_list=array();
         $json_collection_liked_list = Session::get('json_collection_liked_list');
         Session::delete('json_collection_liked_list');
-        Log::debug('json_collection_liked_list セッションに入ってた=>:'.print_r($json_collection_liked_list,true));
+        //Log::debug('json_collection_liked_list セッションに入ってた=>:'.print_r($json_collection_liked_list,true));
         if($json_collection_liked_list !== null){
             //セッションに入っていた場合
-            Log::debug('$json_collection 追加前=>:'.print_r($json_collection,true));
+            //Log::debug('$json_collection 追加前=>:'.print_r($json_collection,true));
             $json_collection_liked_list = array_merge($json_collection_liked_list, $json_collection);
-            Log::debug('$json_collection 追加後=>:'.print_r($json_collection_liked_list,true));
+            //Log::debug('$json_collection 追加後=>:'.print_r($json_collection_liked_list,true));
 
             $setRst = Session::set('json_collection_liked_list', $json_collection_liked_list);
-            Log::debug('$setRst:'.print_r($setRst,true));
-            Log::debug('$json_collection:'.print_r($json_collection_liked_list,true));
+            //Log::debug('$setRst:'.print_r($setRst,true));
+            //Log::debug('$json_collection:'.print_r($json_collection_liked_list,true));
             return $json_collection_liked_list;
 
         }else{
             if(!empty($json_collection)){
 
                 $setRst = Session::set('json_collection_liked_list', $json_collection);
-                Log::debug('$setRst:'.print_r($setRst,true));
-                Log::debug('$json_collection:'.print_r($json_collection,true));
+                //Log::debug('$setRst:'.print_r($setRst,true));
+                //Log::debug('$json_collection:'.print_r($json_collection,true));
                 return $json_collection;
 
             }else{
@@ -3291,7 +3464,7 @@ EOT;
             $obj = json_decode( $json );
 
             if($obj){
-                Log::debug('$obj:'.print_r($obj,true));
+                //Log::debug('$obj:'.print_r($obj,true));
                 if(empty($obj->errors)){                    
                     Log::debug('$obj アカウントが存在しました:'.print_r($obj,true));
                     return true;
@@ -3454,44 +3627,8 @@ EOT;
                 // JSONをオブジェクトに変換
                 $obj = json_decode( $json ) ;
                 $obj_header = $this->header_decode($header);
-                Log::debug('$obj_header:'.print_r($obj_header,true));            
-                Log::debug('$obj:'.print_r($obj,true));         
-
-                //非公開ユーザーの場合、usersがないのでここには入らない
-                // if(!empty($obj->users)){
-                //     $obj_collection->append($obj->users);
-                //     Log::debug('x-rate-limit-remaining:'.print_r($obj_header['x-rate-limit-remaining'],true));
-                //     if($obj_header['x-rate-limit-remaining'] < 1) {
-                //         Log::debug('フォロワー取得上限です！自動フォローを一時中断します');
-                        
-                //         //リクエスト上限に引っかかった
-                //         return array(
-                //             'res' => 'LIMIT',
-                //             'msg' => 'フォロワー取得上限になりました(TwitterAPI)',
-                //             'rst' => $obj_collection
-                //         );
-    
-                //     }
-                // }else{
-                //     //'x-rate-limit-remaining'リクエストできる残回数
-                //     if($obj_header['x-rate-limit-remaining'] < 1) {
-                //         Log::debug('フォロワー取得上限です！自動フォローを一時中断します');                        
-                //         //リクエスト上限に引っかかった
-                //         return array(
-                //             'res' => 'LIMIT',
-                //             'msg' => 'フォロワー取得上限になりました(TwitterAPI)',
-                //             'rst' => $obj_collection
-                //         );
-    
-                //     }
-                //     //ここに入るのはアカウントが非公開であることを想定
-                //     //非公開の場合はこのユーザーをスキップする
-                //     return array(
-                //         'res' => 'PRIVATE',
-                //         'msg' => '非公開のユーザーです。このユーザーはスキップします',
-                //         'rst' => false
-                //     );
-                // }
+                //Log::debug('$obj_header:'.print_r($obj_header,true));            
+                //Log::debug('$obj:'.print_r($obj,true));
 
                 if($obj){
                     if(empty($obj->error)){
@@ -3513,12 +3650,11 @@ EOT;
 
                         }else{
                             //１．ページが存在しない
-                            Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                            Log::debug('$obj タイムライン取得に失敗@getfollower');
 
                             //アクセス制限にかかった場合はLIMITを返す
                             if($obj_header['x-rate-limit-remaining'] < 1) {
-                                Log::debug('フォロワー取得上限です！自動フォローを一時中断します');
-                                
+                                Log::debug('フォロワー取得上限です！自動フォローを一時中断します');                                
                                 //リクエスト上限に引っかかった
                                 return array(
                                     'res' => 'LIMIT',
@@ -3526,41 +3662,47 @@ EOT;
                                     'rst' => $obj_collection
                                 );
                             }
-
-                            switch($obj->errors[0]->code){
-                                //アカウントが非公開の場合
-                                case 179:
-                                    return array(
-                                        'res' => 'PRIVATE',
-                                        'msg' => '非公開のユーザーです。このユーザーはスキップします',
-                                        'rst' => false
-                                    );
-                                    break;
-
-                                //SPAMから守るためにアカウントを一時停止した
-                                case 326:
-                                    return array(
-                                        'res' => 'SPAM',
-                                        'msg' => 'SPAMから守るためアカウントを一時停止しました',
-                                        'rst' => false
-                                    );
-                                    break;
-
-                                default:
-                                    return array(
-                                        'res' => 'NG',
-                                        'msg' => 'なにかしらのエラーが発生しました',
-                                        'rst' => false
-                                    );
-                                    break;
+                            if(!empty($obj->errors[0]->code)){
+                                switch($obj->errors[0]->code){
+                                    //アカウントが非公開の場合
+                                    case 179:
+                                        return array(
+                                            'res' => 'PRIVATE',
+                                            'msg' => '非公開のユーザーです。このユーザーはスキップします',
+                                            'rst' => false
+                                        );
+                                        break;
+    
+                                    //SPAMから守るためにアカウントを一時停止した
+                                    case 326:
+                                        return array(
+                                            'res' => 'SPAM',
+                                            'msg' => 'SPAMから守るためアカウントを一時停止しました',
+                                            'rst' => false
+                                        );
+                                        break;
+    
+                                    default:
+                                        return array(
+                                            'res' => 'NG',
+                                            'msg' => 'なにかしらのエラーが発生しました',
+                                            'rst' => false
+                                        );
+                                        break;
+                                }
+                            }else{
+                                return array(
+                                    'res' => 'NG',
+                                    'msg' => 'なにかしらのエラーが発生しました',
+                                    'rst' => false
+                                );
                             }
                             
                         }
                     }else{
-
-                        //１．アカウントが非公開
-                        //２．
-                        Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                        
+                        Log::debug('$obj タイムライン取得に失敗');
+                        // Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
 
                         //アクセス制限にかかった場合はLIMITを返す
                         if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -3607,7 +3749,7 @@ EOT;
                     //$objが空の場合
                     //１．アクセス制限である                
                     //２．ネット環境が悪い
-                    Log::debug('$objが空です！！タイムライン取得に失敗 =>:'.print_r($obj,true));
+                    Log::debug('$objが空です！！タイムライン取得に失敗');
                     return array(
                         'res' => 'NG',
                         'msg' => 'なにかしらのエラーが発生しました',
@@ -3621,7 +3763,8 @@ EOT;
             // Log::debug('$obj_header:'.print_r($obj_header,true));            
             // Log::debug('$obj:'.print_r($obj,true));            
             // if(!empty($obj->users)){                    
-                Log::debug('$obj フォロワーを取得しました:'.print_r($obj,true));
+                Log::debug('$obj フォロワーを取得しました');
+                // Log::debug('$obj フォロワーを取得しました:'.print_r($obj,true));
                 return array(
                     'res' => 'OK',
                     'msg' => 'フォロワーを取得しました',
@@ -3783,44 +3926,8 @@ EOT;
                 // JSONをオブジェクトに変換
                 $obj = json_decode( $json ) ;
                 $obj_header = $this->header_decode($header);
-                Log::debug('$obj_header:'.print_r($obj_header,true));            
-                Log::debug('$obj:'.print_r($obj,true));         
-
-                //非公開ユーザーの場合、usersがないのでここには入らない
-                // if(!empty($obj->users)){
-                //     $obj_collection->append($obj->users);
-                //     Log::debug('x-rate-limit-remaining:'.print_r($obj_header['x-rate-limit-remaining'],true));
-                //     if($obj_header['x-rate-limit-remaining'] < 1) {
-                //         Log::debug('フォロワー取得上限です！自動フォローを一時中断します');
-                        
-                //         //リクエスト上限に引っかかった
-                //         return array(
-                //             'res' => 'LIMIT',
-                //             'msg' => 'フォロワー取得上限になりました(TwitterAPI)',
-                //             'rst' => $obj_collection
-                //         );
-    
-                //     }
-                // }else{
-                //     //'x-rate-limit-remaining'リクエストできる残回数
-                //     if($obj_header['x-rate-limit-remaining'] < 1) {
-                //         Log::debug('フォロワー取得上限です！自動フォローを一時中断します');                        
-                //         //リクエスト上限に引っかかった
-                //         return array(
-                //             'res' => 'LIMIT',
-                //             'msg' => 'フォロワー取得上限になりました(TwitterAPI)',
-                //             'rst' => $obj_collection
-                //         );
-    
-                //     }
-                //     //ここに入るのはアカウントが非公開であることを想定
-                //     //非公開の場合はこのユーザーをスキップする
-                //     return array(
-                //         'res' => 'PRIVATE',
-                //         'msg' => '非公開のユーザーです。このユーザーはスキップします',
-                //         'rst' => false
-                //     );
-                // }
+                //Log::debug('$obj_header:'.print_r($obj_header,true));            
+                //Log::debug('$obj:'.print_r($obj,true));   
 
                 if($obj){
                     if(empty($obj->error)){
@@ -3830,8 +3937,7 @@ EOT;
                             Log::debug('x-rate-limit-remaining:'.print_r($obj_header['x-rate-limit-remaining'],true));
                             //アクセス制限にかかった場合はLIMITを返す
                             if($obj_header['x-rate-limit-remaining'] < 1) {
-                                Log::debug('フォロワー取得上限です！自動フォローを一時中断します');
-                                
+                                Log::debug('フォロワー取得上限です！自動フォローを一時中断します');                                
                                 //リクエスト上限に引っかかった
                                 return array(
                                     'res' => 'LIMIT',
@@ -3842,7 +3948,7 @@ EOT;
 
                         }else{
                             //１．ページが存在しない
-                            Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                            Log::debug('$obj タイムライン取得に失敗@getfollower_unf');
 
                             //アクセス制限にかかった場合はLIMITを返す
                             if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -3889,7 +3995,7 @@ EOT;
 
                         //１．アカウントが非公開
                         //２．
-                        Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                        Log::debug('$obj タイムライン取得に失敗');
 
                         //アクセス制限にかかった場合はLIMITを返す
                         if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -3936,7 +4042,7 @@ EOT;
                     //$objが空の場合
                     //１．アクセス制限である                
                     //２．ネット環境が悪い
-                    Log::debug('$objが空です！！タイムライン取得に失敗 =>:'.print_r($obj,true));
+                    Log::debug('$objが空です！！タイムライン取得に失敗');
                     return array(
                         'res' => 'NG',
                         'msg' => 'なにかしらのエラーが発生しました',
@@ -3950,7 +4056,7 @@ EOT;
             // Log::debug('$obj_header:'.print_r($obj_header,true));            
             // Log::debug('$obj:'.print_r($obj,true));            
             // if(!empty($obj->users)){                    
-                Log::debug('$obj フォロワーを取得しました:'.print_r($obj,true));
+                Log::debug('$obj フォロワーを取得しました');
                 return array(
                     'res' => 'OK',
                     'msg' => 'フォロワーを取得しました',
@@ -4019,11 +4125,11 @@ EOT;
         $useraccount_obj=array();
         if($day !== null && $flag !== null){
             $before_day = '-'.$day.' days';
-            \Log::debug('何日前？：'.$before_day);
+            Log::debug('何日前？：'.$before_day);
             $date_today=new \DateTime();
-            \Log::debug('今の時間：'.$date_today->format('Y-m-d H:i:s'));
+            Log::debug('今の時間：'.$date_today->format('Y-m-d H:i:s'));
             $date_today_before = $date_today->modify($before_day)->format('Y-m-d H:i:s');
-            \Log::debug('30日前の時間：'.$date_today_before);
+            Log::debug('30日前の時間：'.$date_today_before);
             $useraccount_obj = Db::get_useraccount($account_id, $type, $date_today_before, $flag);
         }else{
             $useraccount_obj = Db::get_useraccount($account_id, $type);
@@ -4055,7 +4161,6 @@ EOT;
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$acrive_user:'.print_r($screen_name,true));
         if(isset($u_id) && isset($screen_name)){
-
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
             Log::debug('$u_info:'.print_r($u_info,true));
@@ -4169,8 +4274,8 @@ EOT;
             // JSONをオブジェクトに変換 (処理する場合)
             $obj = json_decode( $json ) ;
 
-            Log::debug('$obj@dofollw:'.print_r($obj,true));
-            Log::debug('$header@dofollw:'.print_r($header,true));
+            //Log::debug('$obj@dofollw:'.print_r($obj,true));
+            //Log::debug('$header@dofollw:'.print_r($header,true));
 
             if($obj){
 
@@ -4268,7 +4373,8 @@ EOT;
                             //     break;
     
                             default:
-                                Log::debug('$obj フォローに失敗=>:'.print_r($obj,true));
+                                Log::debug('$obj フォローに失敗');
+                                // Log::debug('$obj フォローに失敗'.print_r($obj,true));
                                 return array(
                                     'res' => 'NG',
                                     'msg' => 'フォローに失敗しました',
@@ -4277,7 +4383,8 @@ EOT;
                         }
 
                     }else {
-                        Log::debug('$obj フォローに失敗=>:'.print_r($obj,true));
+                        Log::debug('$obj フォローに失敗');
+                        // Log::debug('$obj フォローに失敗=>:'.print_r($obj,true));
                         return array(
                             'res' => 'NG',
                             'msg' => 'フォローに失敗しました',
@@ -4291,7 +4398,8 @@ EOT;
                 //１．アクセス制限である
                 //２．アカウントが非公開
                 //３．ネット環境が悪い
-                Log::debug('$objが空です！！フォローに失敗 =>:'.print_r($obj,true));
+                Log::debug('$objが空です！！フォローに失敗');
+                // Log::debug('$objが空です！！フォローに失敗 =>:'.print_r($obj,true));
                 return array(
                     'res' => 'NG',
                     'msg' => 'フォローに失敗しました',
@@ -4434,7 +4542,7 @@ EOT;
     
             // JSONをオブジェクトに変換 (処理する場合)
             $obj = json_decode( $json );
-            Log::debug('$obj アンフォローの結果=>:'.print_r($obj,true));
+            //Log::debug('$obj アンフォローの結果=>:'.print_r($obj,true));
             if($obj){
                 if(empty($obj->errors)){ 
                     Log::debug('アンフォローに成功しました！');
@@ -4509,7 +4617,8 @@ EOT;
                             'rst' => $obj
                         );
                     }else{
-                        Log::debug('$obj アンフォローに失敗=>:'.print_r($obj,true));
+                        Log::debug('$obj アンフォローに失敗');
+                        // Log::debug('$obj アンフォローに失敗=>:'.print_r($obj,true));
                         return array(
                             'res' => 'NG',
                             'msg' => 'アンフォローに失敗しました',
@@ -4523,7 +4632,8 @@ EOT;
                 //１．アクセス制限である
                 //２．アカウントが非公開
                 //３．ネット環境が悪い
-                Log::debug('$objが空です！！アンフォローに失敗 =>:'.print_r($obj,true));
+                Log::debug('$objが空です！！アンフォローに失敗');
+                // Log::debug('$objが空です！！アンフォローに失敗 =>:'.print_r($obj,true));
                 return array(
                     'res' => 'NG',
                     'msg' => 'アンフォローに失敗しました',
@@ -4670,8 +4780,10 @@ EOT;
             // JSONをオブジェクトに変換
             $obj = json_decode( $json );
             $obj_header = $this->header_decode($header);
-            Log::debug('$obj@checkIfActiveuser =>:'.print_r($obj,true));
-            Log::debug('$obj_header@checkIfActiveuser =>:'.print_r($obj_header,true));
+            Log::debug('$obj@checkIfActiveuser');
+            Log::debug('$obj_header@checkIfActiveuser');
+            // Log::debug('$obj@checkIfActiveuser =>:'.print_r($obj,true));
+            // Log::debug('$obj_header@checkIfActiveuser =>:'.print_r($obj_header,true));
             if($obj){
                 if(empty($obj->error)){ 
                     if(empty($obj->errors)){
@@ -4702,7 +4814,8 @@ EOT;
                         }
                     }else{
                         //１．ページが存在しない
-                        Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                        Log::debug('$obj タイムライン取得に失敗');
+                        // Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
 
                         //アクセス制限にかかった場合はLIMITを返す
                         if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -4727,7 +4840,8 @@ EOT;
                 }else{
                     //１．アカウントが非公開
                     //２．
-                    Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                    Log::debug('$obj タイムライン取得に失敗');
+                    // Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
 
                     //アクセス制限にかかった場合はLIMITを返す
                     if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -4753,7 +4867,7 @@ EOT;
                 //$objが空の場合
                 //１．アクセス制限である                
                 //２．ネット環境が悪い
-                Log::debug('$objが空です！！タイムライン取得に失敗 =>:'.print_r($obj,true));
+                Log::debug('$objが空です！！タイムライン取得に失敗');
                 return null;
             }
 
@@ -4796,8 +4910,6 @@ EOT;
             $access_token_secret = $u_info[0]['access_token_secret'];	// アクセストークンシークレット
             $request_url = 'https://api.twitter.com/1.1/friendships/lookup.json' ;		// エンドポイント
             $request_method = 'GET' ;
-
-            Log::debug('$usernameArray:'.print_r(implode(",", $usernameArray_pick),true));
 
             // パラメータA (オプション)
             $params_a = array(
@@ -4902,7 +5014,8 @@ EOT;
             $obj = json_decode( $json );
           
             $obj_header = $this->header_decode($header);
-            Log::debug('$obj@checkIfActiveuser =>:'.print_r($obj,true));
+            Log::debug('$obj@checkIfActiveuser');
+            // Log::debug('$obj@checkIfActiveuser =>:'.print_r($obj,true));
             if($obj){
                 if(empty($obj->error)){ 
                     if(empty($obj->errors)){
@@ -4916,7 +5029,7 @@ EOT;
                         
                     }else{
                         //１．ページが存在しない
-                        Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                        Log::debug('$obj タイムライン取得に失敗@checkfriendship');
 
                         //アクセス制限にかかった場合はLIMITを返す
                         if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -4966,7 +5079,8 @@ EOT;
                 }else{
                     //１．アカウントが非公開
                     //２．
-                    Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
+                    Log::debug('$obj タイムライン取得に失敗');
+                    // Log::debug('$obj タイムライン取得に失敗=>:'.print_r($obj,true));
 
                     //アクセス制限にかかった場合はLIMITを返す
                     if($obj_header['x-rate-limit-remaining'] < 1) {
@@ -5014,7 +5128,7 @@ EOT;
                 //$objが空の場合
                 //１．アクセス制限である                
                 //２．ネット環境が悪い
-                Log::debug('$objが空です！！タイムライン取得に失敗 =>:'.print_r($obj,true));
+                Log::debug('$objが空です！！タイムライン取得に失敗');
                 return null;
             }
 
@@ -5036,7 +5150,7 @@ EOT;
     **/
     public function checkFollowTarget($text, $search_keyword)
     {
-        $result_or=true; //ORキーワードで調査した結果
+        $result_or=false; //ORキーワードで調査した結果
         $or_num=0;//ORキーワードの数
         $result_and=true;//ANDキーワードで調査した結果
         $and_num=0;
@@ -5060,11 +5174,8 @@ EOT;
                 $or_num = $or_num + 1;
                 //ORで登録したキーワード
                 //ORキーワードのうち一つでも含まれていれば$result_orはtrue
-                if(strpos($text,$val['word']) === false){
+                if(strpos($text,$val['word']) !== false){
                     //含まれていない場合
-                    $result_or=false;
-                }else{
-                    //含まれている場合はtrueにする
                     $result_or=true;
                 }
             }
@@ -5075,8 +5186,18 @@ EOT;
                 if(strpos($text,$val['word']) !== false){
                     //含まれている場合
                     $result_not=true;
+                    break;
                 }
             }
+
+            if(!preg_match( "/[ぁ-ん]+|[ァ-ヴー]+/u", $str)){
+                //日本語が含まれていない場合は、falseを返す
+                //$result_notをtrueにしてreturn falseになるようにする
+                $result_not=true;
+                break;
+            }
+
+
 
         }
 
@@ -5098,6 +5219,162 @@ EOT;
             return false;
         }
 
+    }
+
+   
+
+    /**
+     * $textにフォロワーターゲットキーワードが含まれるか調べる
+     * 
+     * @param MAILTYPE
+     * @return　送信成功:true 　送信失敗：false
+    **/
+    public function mailTo($type)
+    {
+        Log::debug('メール送信します:'.print_r($type,true));
+        Log::debug('MAILTYPE::FINISH_AUTOFOLLOW:'.print_r(MAILTYPE::FINISH_AUTOFOLLOW,true));
+        Log::debug('MAILTYPE::FINISH_AUTOFOLLOW:'.print_r(MAILTYPE::FINISH_AUTOLIKE,true));
+        //ユーザーID取得
+        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
+        Log::debug('$u_id:'.print_r($u_id,true));
+        if($u_id){
+            try{
+            //メールアドレスを取得する
+            $mailtoArray = Db::get_email($u_id);
+            $mailto = $mailtoArray[0]['email'];
+            Log::debug('$mailto:'.print_r($mailto,true));
+            $mailfrom = "From:webukatsutest@service-1.masashisite.com";
+            $subject = '';            
+            $content = '';
+            switch($type){
+    
+                case MAILTYPE::FINISH_AUTOFOLLOW:
+                    $subject = "【自動フォロー完了】｜神ったー";
+                    $content = <<<EOT
+自動フォローが完了しました。
+現在登録しているターゲットアカウントを削除し、新たにターゲットアカウントを新規に登録するか、
+フォロワーサーチキーワードを変えてみてください！
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+                case MAILTYPE::FINISH_AUTOLIKE:
+                    $subject = "【自動いいね完了】｜神ったー";
+                    $content = <<<EOT
+自動いいねが完了しました。
+キーワードを新たに登録してみよう！
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+                case MAILTYPE::FINISH_AUTOUNFOLLOW:
+                    $subject = "【自動フォロー解除完了】｜神ったー";
+                    $content = <<<EOT
+自動フォロー解除が完了しました。
+【自動フォロー解除動作条件】
+・フォロー数が5000人以上
+・15分間隔
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+                case MAILTYPE::ERROR_REQUEST_AUTOFOLLOW:
+                    $subject = "【自動フォロー制限中】｜神ったー";
+                    $content = <<<EOT
+下記の理由で自動フォロー制限中です。
+制限解除されたら自動的に再開します。
+
+・一日のフォロー上限になった
+・フォローを短時間で大量に実施した
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+                case MAILTYPE::ERROR_REQUEST_AUTOLIKE:
+                    $subject = "【自動いいね制限中】｜神ったー";
+                    $content = <<<EOT
+下記の理由により自動いいね制限中です。
+制限解除されたら自動的に再開します。
+
+・短時間でいいねしすぎた
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+                case MAILTYPE::ERROR_REQUEST_AUTOUNFOLLOW:
+                    $subject = "【自動フォロー解除制限中】｜神ったー";
+                    $content = <<<EOT
+下記の理由により自動フォロー解除制限中です。
+制限解除されたら自動的に再開します。
+
+・短時間でフォロー解除しすぎた
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+                case MAILTYPE::ERROR_SPAM_DETECTED:
+                    $subject = "【機能停止連絡】｜神ったー";
+                    $content = <<<EOT
+アカウントの機能が制限されています。
+https://twitter.com にログインして制限解除してください。
+
+////////////////////////////////////////
+カスタマーセンター
+URL  https://masashisite.com/
+E-mail fktlnz@gmail.com
+////////////////////////////////////////
+EOT;
+                    break;
+            }            
+            // 文字化けするようなら下記のコメントアウト解除してみて
+            // mb_language("ja");
+            mb_internal_encoding("UTF-8");
+            
+            // メール送信処理
+            $result = mb_send_mail($mailto,$subject,$content,$mailfrom);
+
+            //結果をフロントに返す
+            if($result){
+                Log::debug('メール送信完了');
+                return true;         
+            }else{
+                Log::debug('メール送信に失敗しました');
+                return false;     
+            }
+
+            }catch(Exception $e){
+                Log::debug('メール送信に失敗しました!');
+                return false;  
+            }
+            
+
+        }else{
+            return false;
+        }
     }
     
 

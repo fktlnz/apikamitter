@@ -17,6 +17,17 @@ class Db extends \Model
             return false;
         }        
     }
+    //認証アカウントの数を取得する
+    public static function get_myaccountnum($u_id=null)
+    {
+        try{
+            return $query = \DB::select(\DB::expr('COUNT(*) as count'))->from('myaccount')->where(array(
+                'user_id' => $u_id,
+            ))->execute()->current();
+        }catch(Exception $e) {
+            return false;
+        }        
+    }
     //usernameの登録があるか確認する
     public static function chk_usernameExist($username=null)
     {
@@ -35,6 +46,20 @@ class Db extends \Model
         try{
             return $query = \DB::select('screen_name')->from('myaccount')->where(array(
                 'user_id' => $u_id,
+                'delete_flg' => 0
+            ))->execute()->as_array();
+        }catch(Exception $e) {
+            return false;
+        }
+        
+        
+    }
+    // メールアドレスを取得する
+    public static function get_email($u_id=null)
+    {
+        try{
+            return $query = \DB::select('email')->from('users')->where(array(
+                'id' => $u_id,
                 'delete_flg' => 0
             ))->execute()->as_array();
         }catch(Exception $e) {
