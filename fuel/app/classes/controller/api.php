@@ -157,7 +157,8 @@ class Controller_Api extends Controller_Rest
                         // セッションにユーザーIDを格納
                         session_start();
                         session_regenerate_id( true );
-                        $_SESSION["user_id"] = Auth::get('id');
+                        // $_SESSION["user_id"] = Auth::get('id');
+                        Session::set('user_id', Auth::get('id'));
 
                         Session::set("unfollow_type", true);//アンフォローするとき、非アクティブユーザーのフォロー解除するか、フォローバックしていないユーザーをフォロー解除するか
                         Session::set("mail_status", '0');//デフォルトはメール配信しない、とする
@@ -407,7 +408,9 @@ EOT;
 
         //認証しているアカウントの数を取得
         //10人超えている場合はNG
-        $u_id = $_SESSION["user_id"];
+        // $u_id = $_SESSION["user_id"];
+        $u_id = Session::get('user_id');
+
         $rst_myaccountNum = Db::get_myaccountnum($u_id);
         Log::debug('認証アカウント数->'.print_r($rst_myaccountNum['count'], true));
         if($rst_myaccountNum['count'] > 10) {
@@ -522,7 +525,8 @@ EOT;
                 Log::debug('$query:'.print_r($query,true));
                 $data = array();
                 $data['screen_name'] = $query['screen_name'];
-                $data['user_id'] = $_SESSION['user_id'];
+                $data['user_id'] = Session::get('user_id');;
+                // $data['user_id'] = $_SESSION['user_id'];
                 $data['access_token'] = $query['oauth_token'];
                 $data['access_token_secret'] = $query['oauth_token_secret'];
                 $data['create_date'] = date('Y:m:d h:i:s');
@@ -685,15 +689,17 @@ EOT;
     public function get_getaccount()
     {
         session_start();
-        $u_id = $_SESSION["user_id"];
+        $u_id = Session::get('user_id');;
+        // $u_id = $_SESSION["user_id"];
         
         Log::debug('Userid:'.print_r($u_id,true));
         $screen_name = Db::get_screenName($u_id);
         if(count($screen_name) > 0){
             //認証済みアカウントが存在する場合
-            if(empty($_SESSION['active_user'])){
+            if(Session::get('active_user')){
                 //初回アクセス時に入る。取得したscreen_nameの最初のアカウントをactive_userとする
-                $_SESSION['active_user'] = $screen_name[count($screen_name)-1]['screen_name'];
+                Session::set('active_user', $screen_name[count($screen_name)-1]['screen_name']);
+                // $_SESSION['active_user'] = $screen_name[count($screen_name)-1]['screen_name'];
             }
 
         }
@@ -734,7 +740,8 @@ EOT;
         //         ));
         // }
         session_start();
-        $username = $_SESSION['active_user'];
+        $username = Session::get('active_user');;
+        // $username = $_SESSION['active_user'];
         $twitter_profile = $this->getTwitterProfile($username);        
 
         Log::debug('twitter_profile:'.print_r($twitter_profile['rst'],true));
@@ -774,9 +781,11 @@ EOT;
     public function get_deleteaccount()
     {
         session_start();
-        $u_id = $_SESSION["user_id"];
-        $screen_name = $_GET['screen_name'];
-        if(isset($u_id) && isset($screen_name)){
+        $u_id = Session::get('user_id');;
+        // $u_id = $_SESSION["user_id"];
+        $screen_name = Input::get('screen_name');
+
+        if($u_id !== null && $screen_name !== null){
 
             Log::debug('Userid@deleteaccount:'.print_r($u_id,true));
             $rst = Db::delete_account($u_id, $screen_name);
@@ -818,33 +827,41 @@ EOT;
     public function get_getuserinfo()
     {
         session_start();
-        $u_id = $_SESSION["user_id"];
-        $screen_name = $_GET['screen_name'];
+        $u_id = Session::get('user_id');;
+        // $u_id = $_SESSION["user_id"];
+        $screen_name = Input::get('screen_name');
 
         //アカウントを切り替えたか
         //切り替えた場合はセッションをリセットする
-        $IsChangeUser = ($screen_name === $_SESSION['active_user']);
+        $IsChangeUser = ($screen_name === Session::get('active_user'));
+        // $IsChangeUser = ($screen_name === $_SESSION['active_user']);
         Log::debug('IsChangeUser'.$IsChangeUser);
         //===アクティブユーザーを変更する===///
-        $_SESSION['active_user'] = $screen_name;
-        Log::debug('アクティブユーザー変更：'.$_SESSION['active_user']);
+        Session::set('active_user',$screen_name);
+        // $_SESSION['active_user'] = $screen_name;
+        Log::debug('アクティブユーザー変更：'.Session::get('active_user'));
         
 
         //アクティブユーザーを切り替えたときに
         //前のアカウントで保持したセッションをリセットする
-        if(!empty($_SESSION) && !$IsChangeUser){            
+        if(!$IsChangeUser){            
             Log::debug('アクティブアカウントが切り替わったため、セッションを削除します');
-            Session::delete("json_collection_liked_list");
-            Session::delete("next_cursor");
+            Session::delete("json_collection_liked_list");            
             Session::delete("skip_num");
             Session::delete("skip_num_unf");
             Session::delete("UnFollowPotentialList");
             Session::delete('unfollow-type');
             Session::delete('follower_list');
             Session::delete('follower_list_skip_num');
+            if(!empty($_SESSION["next_cursor"])){
+                unset($_SESSION["next_cursor"]);
+            }
+            if(!empty($_SESSION["next_cursor_unf"])){
+                unset($_SESSION["next_cursor_unf"]);
+            }
         }
 
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             Log::debug('Userid@getuserinfo:'.print_r($u_id,true));
             $rst = $this->getUserInfo($u_id, $screen_name);
@@ -853,7 +870,7 @@ EOT;
                 return $this->response(array(
                     'res' => 'OK',
                     'msg' => 'アカウントを切り替えました。',
-                    'active_user' => $_SESSION['active_user'],
+                    'active_user' => Session::get('active_user'),
                     'result' => $rst,                
                 ));
     
@@ -862,7 +879,7 @@ EOT;
                 return $this->response(array(
                     'res' => 'NG',
                     'msg' => 'アカウントの切り替えに失敗しました。ネットワークを確認してください。',
-                    'active_user' => $_SESSION['active_user'],
+                    'active_user' => Session::get('active_user'),
                     'result' => $rst,                
                 ));
                 
@@ -890,7 +907,7 @@ EOT;
         return $this->response(array(
                     'res' => 'OK',
                     'msg' => 'アクティブユーザーの取得に成功しました',
-                    'active_user' => $_SESSION['active_user']
+                    'active_user' => Session::get('active_user')
                 ));
     }
 
@@ -902,10 +919,10 @@ EOT;
     **/
     public function get_tweet()
     {
-        $text = !empty($_GET['text']) ? $_GET['text'] : false;
-        $s_id = !empty($_GET['id']) ? $_GET['id'] : false;
+        $text = Input::get('text');
+        $s_id = Input::get('id');
         Log::debug('text:'.print_r($text,true));
-        if($text && $s_id){            
+        if($text !== null && $s_id !== null){            
             $rst = $this->tweet($text);
             $rst = Db::set_scheduleDone($s_id); //スケジュールテーブルのIDを渡してツイート済みにする
             return $this->response(array(
@@ -933,17 +950,17 @@ EOT;
     public function get_savetweetschedule()
     {
         session_start();
-        $id = !empty($_GET['id']) ? $_GET['id'] : false;
-        $text = !empty($_GET['text']) ? $_GET['text'] : false;
-        $time = !empty($_GET['time']) ? $_GET['time'] : false;
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
+        $id = Input::get('id');
+        $text = Input::get('text');
+        $time = Input::get('time');
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('id:'.print_r($id,true));
         Log::debug('text:'.print_r($text,true));
         Log::debug('time:'.print_r($time,true));
         Log::debug('u_id:'.print_r($u_id,true));
         Log::debug('screen_name:'.print_r($screen_name,true));
-        if($id && $text && $time && $u_id && $screen_name){   
+        if($id !== null && $text !== null && $time !== null && $u_id !== null && $screen_name !== null){   
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -995,10 +1012,10 @@ EOT;
     public function get_gettweetschedule()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : 0;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : 0;
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('予約ツイート取得:'.print_r($screen_name,true));
-        if($u_id && $screen_name){   
+        if($u_id !== null && $screen_name !== null){   
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1122,10 +1139,10 @@ EOT;
     public function get_getfollowedlist()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
 
-        if(isset($u_id) && isset($screen_name)){   
+        if($u_id !== null && $screen_name !== null){   
             try{                
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1180,10 +1197,10 @@ EOT;
     public function get_getunfollowedlist()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');        
 
-        if(isset($u_id) && isset($screen_name)){   
+        if($u_id !== null && $screen_name !== null){   
             try{                
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1242,17 +1259,26 @@ EOT;
     public function get_startautolike()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');  
 
-        if(isset($u_id) && isset($screen_name)){   
+        if($u_id !== null && $screen_name !== null){   
             try{
                 
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
                 Log::debug('u_info:'.print_r($u_info,true));
                 $account_id = $u_info[0]['id'];
+
+                //likeキーワードを取得し、登録がない場合はエラー
+                $likeWordArray = Db::get_keyword($account_id, 1);
+                if(count($likeWordArray) == 0){
+                    return $this->response(array(
+                        'res' => 'NG',
+                        'msg' => 'いいねキーワードを登録してください！',
+                        'rst' => false
+                    ));
+                }
                 
                 //いいねをつけるツイートIDの一覧を取得する
                 $tweetIdList_forLike = $this->getTweetIdList_forLike($account_id);
@@ -1342,12 +1368,10 @@ EOT;
     public function get_startautofollow()
     {
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        // unset($_SESSION["next_cursor"]);
-        // unset($_SESSION["skip_num"]);
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         
-        if(isset($u_id) && isset($screen_name)){   
+        if($u_id !== null && $screen_name !== null){   
             try{
                 
                 //アカウント情報を取得する(idを使う)
@@ -1397,9 +1421,9 @@ EOT;
                     //フォロー再開時に使用する
                     $key_num = $key;
                     if(Session::get('skip_num') !== null){ 
-                        Log::debug('前回途中で中断しています　skip_num=>'.print_r($_SESSION['skip_num'],true));                       
+                        Log::debug('前回途中で中断しています　skip_num=>'.print_r(Session::get('skip_num'),true));                       
                         //中断して再開するとき、もとのループまでスキップする
-                        if($_SESSION['skip_num'] > $key) {
+                        if(Session::get('skip_num') > $key) {
                             Log::debug('この回数スキップします＝＞'.print_r($key,true));
                             continue;
                         }
@@ -1505,7 +1529,8 @@ EOT;
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
                             Session::set("follower_list", $follower_list);
                             Session::set("follower_list_skip_num", $follower_list_skip_num);
-                            $_SESSION['skip_num'] = $key_num;
+                            // $_SESSION['skip_num'] = $key_num;
+                            Session::set('skip_num',$key_num);
 
                             //メール配信（フォローリミット）
                             if(Session::get('mail_status') === '1'){
@@ -1539,7 +1564,9 @@ EOT;
                             //フロント側で15分以上待機して、この関数に入ってくる
                             Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
-                            $_SESSION['skip_num'] = $key_num;
+                            // $_SESSION['skip_num'] = $key_num;
+                            Session::set('skip_num',$key_num);
+                            
 
                             //メール配信（フォロワー取得リミット）
                             if(Session::get('mail_status') === '1'){
@@ -1594,7 +1621,8 @@ EOT;
                     }else{
                         //ループが何周目か保持して、フロントに返す
                         //15分後もういちど入ってくる
-                        $_SESSION['skip_num'] = $key_num;
+                        // $_SESSION['skip_num'] = $key_num;
+                        Session::set('skip_num',$key_num);
                         return $this->response(array(
                             'res' => 'NG',
                             'msg' => 'エラーが発生しました。15分後に再開します。',
@@ -1609,9 +1637,11 @@ EOT;
 
                 Log::debug('$followResult_Collection:'.print_r($followResult_Collection,true));
 
-                if(!empty($_SESSION["next_cursor"]) && $_SESSION["next_cursor"]=0 && $IsFinishedAllAccount ){
+                if(!empty($_SESSION["next_cursor"]) && $_SESSION["next_cursor"]==0 && $IsFinishedAllAccount ){
                     //ターゲットアカウントのフォロワー次ページがない＋アカウントすべてのループが完了している
-                    Session::delete("next_cursor");
+                    if(!empty($_SESSION["next_cursor"])){
+                        unset($_SESSION["next_cursor"]);
+                    }
                     Session::delete("skip_num");
                    
                     //自動フォロー完了メール
@@ -1667,18 +1697,18 @@ EOT;
     public function post_savekeyword()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        $word_id = !empty(Input::post('id')) ? Input::post('id') : false;
-        $like_word = !empty(Input::post('text')) ? Input::post('text') : false;
-        $option = !empty(Input::post('option')) ? Input::post('option') : false;
-        $type = !empty(Input::post('type')) ? Input::post('type') : false;
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');        
+        $word_id = Input::post('id');
+        $like_word = Input::post('text');
+        $option = Input::post('option');
+        $type = Input::post('type');
         Log::debug('word_id:'.print_r($word_id,true));
         Log::debug('like_word:'.print_r($like_word,true));
         Log::debug('option:'.print_r($option,true));
         Log::debug('type:'.print_r($type,true));
 
-        if(isset($u_id) && isset($screen_name) && isset($word_id) && isset($like_word) && isset($option) && isset($type)){   
+        if($u_id !== null && $screen_name !== null && $word_id !== null && $like_word !== null && $option !== null && $type !== null){   
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1739,10 +1769,10 @@ EOT;
     public function get_getkeyword()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        $type = !empty(Input::get('type')) ? Input::get('type') : false; //0:フォロワーサーチ 1:いいねキーワード
-        if(isset($u_id) && isset($screen_name) && isset($type)){   
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');        
+        $type = Input::get('type'); //0:フォロワーサーチ 1:いいねキーワード
+        if($u_id !== null && $screen_name !== null && $type !== null){   
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1793,7 +1823,7 @@ EOT;
     {
 
         $word_id = Input::get('word_id');
-        if(isset($word_id)){
+        if($word_id !== null){
 
             $rst = Db::delete_keyword($word_id);
             Log::debug('delete_accountの結果:'.print_r($rst,true));
@@ -1838,16 +1868,17 @@ EOT;
     public function post_saveuseraccount()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        $word_id = !empty(Input::post('id')) ? Input::post('id') : false;
-        $username = !empty(Input::post('username')) ? Input::post('username') : false;
-        $type = !empty(Input::post('type')) ? Input::post('type') : false;//0:ターゲットアカウント 1:フォロー済アカウント 2:アンフォローアカウント
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');        
+        $word_id = Input::post('id');
+        $username = Input::post('username');
+        $type = Input::post('type');//0:ターゲットアカウント 1:フォロー済アカウント 2:アンフォローアカウント
         Log::debug('word_id:'.print_r($word_id,true));
         Log::debug('username:'.print_r($username,true));
         Log::debug('type:'.print_r($type,true));
+        Log::debug('u_id:'.print_r($u_id,true));
 
-        if(isset($u_id) && isset($screen_name) && isset($word_id) && isset($username) && isset($type)){   
+        if($u_id !== null && $screen_name !== null && $word_id !== false && $username !== null && $type !== null){   
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1907,10 +1938,10 @@ EOT;
     public function get_getuseraccount()
     {        
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        $type = !empty(Input::get('type')) ? Input::get('type') : false; //0:フォロワーサーチ 1:いいねキーワード
-        if(isset($u_id) && isset($screen_name) && isset($type)){   
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');       
+        $type = Input::get('type'); //0:フォロワーサーチ 1:いいねキーワード
+        if($u_id !== null && $screen_name !== null && $type !== null){   
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
@@ -1961,7 +1992,7 @@ EOT;
     {
 
         $word_id = Input::get('word_id');
-        if(isset($word_id)){
+        if($word_id !== null){
 
             $rst = Db::delete_useraccount($word_id);
             Log::debug('delete_accountの結果:'.print_r($rst,true));
@@ -2004,7 +2035,7 @@ EOT;
 
         $username = Input::get('screen_name');
         Log::debug('存在チェック:@'.print_r($username,true));
-        if(isset($username)){
+        if($username !== null){
 
             $rst = $this->checkUserAccountExist($username);
 
@@ -2045,13 +2076,11 @@ EOT;
    
     public function get_startautounfollow()
     {   
-        session_start();            
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : false;
-        // unset($_SESSION["next_cursor"]);
-        // unset($_SESSION["skip_num"]);
+        session_start();
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');  
         
-        if(isset($u_id) && isset($screen_name)){   
+        if($u_id !== null && $screen_name !== null){   
             try{
                 
                 //アカウント情報を取得する(idを使う)
@@ -2066,9 +2095,7 @@ EOT;
                 //=====現在フォローしているアカウントを抽出する=======//
 
                 //フォロー済アカウントを取得（フォローから7日以上経過しているアカウントのみを対象とする）
-///!!!!!!!!!!!!///7日に変更すること
-
-                $AlreadyFollowList_pure_array = $this->getUseraccountArray($account_id, 1, 3, false);//type 1:フォロー済アカウント
+                $AlreadyFollowList_pure_array = $this->getUseraccountArray($account_id, 1, 7, false);//type 1:フォロー済アカウント
                 Log::debug('AlreadyFollowList_pure_array:'.print_r($AlreadyFollowList_pure_array,true));
 
 
@@ -2103,9 +2130,9 @@ EOT;
                     foreach($AlreadyFollowList_pure_array as $key => $val){
                         $key_num = $key;//何周目かを保持
                         if(Session::get('skip_num_unf') !== null){ 
-                            Log::debug('前回途中で中断しています　skip_num=>'.print_r($_SESSION['skip_num_unf'],true));                       
+                            Log::debug('前回途中で中断しています　skip_num=>'.print_r(Session::get('skip_num_unf'),true));                       
                             //中断して再開するとき、もとのループまでスキップする
-                            if($_SESSION['skip_num_unf'] > $key) {
+                            if(Session::get('skip_num_unf') > $key) {
                                 Log::debug('この回数スキップします＝＞'.print_r($key,true));
                                 continue;
                             }
@@ -2129,8 +2156,8 @@ EOT;
                                 //フロント側で3時間以上待機して、自動フォローに入ってくる
                                 Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                                 //次回続きから取得できるようにセッションにページ情報を格納しておく
-                                $_SESSION['skip_num_unf'] = $key_num;
-                                $_SESSION['UnFollowPotentialList'] = $AlreadyFollowList_pure_array;
+                                Session::set('skip_num_unf',$key_num);
+                                Session::set('UnFollowPotentialList',$AlreadyFollowList_pure_array);
 
                                 //自動アンフォロー制限メール
                                 if(Session::get('mail_status') === '1'){
@@ -2150,8 +2177,8 @@ EOT;
                             //フロント側で3時間以上待機して、自動フォローに入ってくる
                             Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
-                            $_SESSION['skip_num_unf'] = $key_num;
-                            $_SESSION['UnFollowPotentialList'] = $AlreadyFollowList_pure_array;
+                            Session::set('skip_num_unf',$key_num);
+                            Session::set('UnFollowPotentialList',$AlreadyFollowList_pure_array);
 
                             //フォロワーじゃなくて、非アクティブユーザーの場合はアンフォローする
                             Log::debug('doUnFollowに入ります');
@@ -2192,8 +2219,8 @@ EOT;
                             //フロント側で3時間以上待機して、自動フォローに入ってくる
                             Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
-                            $_SESSION['skip_num_unf'] = $key_num;
-                            $_SESSION['UnFollowPotentialList'] = $AlreadyFollowList_pure_array;
+                            Session::set('skip_num_unf',$key_num);
+                            Session::set('UnFollowPotentialList',$AlreadyFollowList_pure_array);
 
                             Log::debug('!!!!SPAM判定されました!!!'); 
 
@@ -2277,15 +2304,15 @@ EOT;
 
                     foreach($WillUnfollowList as $key => $val){
                         $key_num = $key;//何周目かを保持
-                        if(Session::get('UnFollowPotentialList') !== null){ 
-                            Log::debug('前回途中で中断しています　skip_num=>'.print_r($_SESSION['skip_num_unf'],true));                       
+                        if(Session::get('skip_num_unf') !== null){ 
+                            Log::debug('前回途中で中断しています　skip_num=>'.print_r(Session::get('skip_num_unf'),true));                       
                             //中断して再開するとき、もとのループまでスキップする
-                            if($_SESSION['skip_num_unf'] > $key) {
+                            if(Session::get('skip_num_unf') > $key) {
                                 Log::debug('この回数スキップします＝＞'.print_r($key,true));
                                 continue;
                             }
                         }
-                        if($Friendship_rst["res"] === 'OK' || Session::get('UnFollowPotentialList') !== null){
+                        if($Friendship_rst["res"] === 'OK' || Session::get('skip_num_unf') !== null){
                             //checkFriendshipがうまくいったとき or 前回途中で終わっている場合にここに入る
     
                             Log::debug('このアカウントをアンフォローします:'.print_r($val,true));
@@ -2303,8 +2330,8 @@ EOT;
                                 //フロント側で3時間以上待機して、自動フォローに入ってくる
                                 Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                                 //次回続きから取得できるようにセッションにページ情報を格納しておく
-                                $_SESSION['skip_num_unf'] = $key_num;
-                                $_SESSION['UnFollowPotentialList'] = $WillUnfollowList;
+                                Session::set('skip_num_unf',$key_num);
+                                Session::set('UnFollowPotentialList',$WillUnfollowList);
 
                                 //自動アンフォロー完了メール
                                 if(Session::get('mail_status') === '1'){
@@ -2324,8 +2351,8 @@ EOT;
                             //フロント側で3時間以上待機して、自動フォローに入ってくる
                             Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
-                            $_SESSION['skip_num_unf'] = $key_num;
-                            $_SESSION['UnFollowPotentialList'] = $WillUnfollowList;
+                            Session::set('skip_num_unf',$key_num);
+                            Session::set('UnFollowPotentialList',$WillUnfollowList);
     
                             //フォロワーじゃなくて、非アクティブユーザーの場合はアンフォローする
                             Log::debug('doUnFollowに入ります');
@@ -2367,8 +2394,8 @@ EOT;
                             //フロント側で3時間以上待機して、自動フォローに入ってくる
                             Log::debug('次再開したとき'.$key_num.'回スキップします。'); 
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
-                            $_SESSION['skip_num_unf'] = $key_num;
-                            $_SESSION['UnFollowPotentialList'] = $WillUnfollowList;
+                            Session::set('skip_num_unf',$key_num);
+                            Session::set('UnFollowPotentialList',$WillUnfollowList);
 
                             //スパム判定メール
                             //アカウント停止されるため、解除を促す
@@ -2448,12 +2475,17 @@ EOT;
         Session::delete('UnFollowPotentialList');
         Session::delete('user_id');
         Session::delete('active_user');
-        Session::delete('skip_num');
-        Session::delete('next_cursor');
+        Session::delete('skip_num');        
         Session::delete('json_collection_liked_list');
         Session::delete('follower_list');
         Session::delete('follower_list_skip_num');
         Session::delete('mail_status');
+        if(!empty($_SESSION["next_cursor"])){
+            unset($_SESSION["next_cursor"]);
+        }
+        if(!empty($_SESSION["next_cursor_unf"])){
+            unset($_SESSION["next_cursor_unf"]);
+        }
 
         // logout        
         $auth = Auth::instance();
@@ -2528,10 +2560,10 @@ EOT;
     public function tweet($text)
     {
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
 
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             $u_info = Db::get_userInfo($u_id, $screen_name);
 
@@ -2651,21 +2683,19 @@ EOT;
     **/
     public function getTwitterProfile($username)
     {
-
-        $screen_name = $_SESSION['active_user'];
-        $u_id = $_SESSION['user_id'];
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
 
         //アカウントを切り替えたか
         //切り替えた場合はセッションをリセットする
-        $IsChangeUser = ($screen_name === $_SESSION['active_user']);
+        $IsChangeUser = ($screen_name === Session::get('active_user'));
         Log::debug('IsChangeUser'.$IsChangeUser);
 
         //アクティブユーザーを切り替えたときに
         //前のアカウントで保持したセッションをリセットする
-        if(!empty($_SESSION) && !$IsChangeUser){            
+        if(!$IsChangeUser){            
             Log::debug('アクティブアカウントが切り替わったため、セッションを削除します');
-            Session::delete("json_collection_liked_list");
-            Session::delete("next_cursor");
+            Session::delete("json_collection_liked_list");            
             Session::delete("skip_num");
             Session::delete("skip_num_unf");
             Session::delete("follower_list_skip_num");
@@ -2673,9 +2703,15 @@ EOT;
             Session::delete('unfollow-type');
             Session::delete('follower_list');
             Session::delete('follower_list_skip_num');
+            if(!empty($_SESSION["next_cursor"])){
+                unset($_SESSION["next_cursor"]);
+            }
+            if(!empty($_SESSION["next_cursor_unf"])){
+                unset($_SESSION["next_cursor_unf"]);
+            }
         }
 
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             $u_info = Db::get_userInfo($u_id, $screen_name);
 
@@ -2932,11 +2968,11 @@ EOT;
      * @return　成功したとき：いいねツイートIDリスト / 失敗したとき：false
     **/
     public function getTweetIdList($word, $num, $notlikeword)
-    {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+    {            
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
 
-        if(isset($word) && isset($num)){
+        if($u_id !== null && $screen_name !== null && isset($word) && isset($num)){
 
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
@@ -3127,10 +3163,10 @@ EOT;
     {
         $json_collection = array();
         $IsError=false;//objが取得できなかった場合：true 
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');       
 
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
@@ -3341,11 +3377,11 @@ EOT;
     public function checkUserAccountExist($username)
     {
         session_start();
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');           
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$screen_name:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
@@ -3496,11 +3532,11 @@ EOT;
     **/
     public function getFollower($username)
     {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$screen_name:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
@@ -3795,11 +3831,11 @@ EOT;
     **/
     public function getFollower_unf($username)
     {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$screen_name:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
 
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
@@ -4156,11 +4192,11 @@ EOT;
     **/
     public function doFollow($username)
     {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$acrive_user:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
             Log::debug('$u_info:'.print_r($u_info,true));
@@ -4425,12 +4461,12 @@ EOT;
      * 
     **/
     public function doUnFollow($username)
-    {        
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+    {    
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');            
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$acrive_user:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
             Log::debug('$u_info:'.print_r($u_info,true));
@@ -4652,12 +4688,12 @@ EOT;
      * @return　アクティブ：true 　非アクティブ：false 判定できなかった:null
     **/
     public function checkIfActiveuser($username)
-    {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+    {        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$acrive_user:'.print_r($screen_name,true));
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
             Log::debug('$u_info:'.print_r($u_info,true));
@@ -4789,7 +4825,7 @@ EOT;
                     if(empty($obj->errors)){
                         $now=new \DateTime();
                         $now_format = $now->format('Y-m-d');
-                        $date_active = $now->modify('-30 days')->format('Y-m-d'); //15日間投稿がなかったら非アクティブユーザーと判定する
+                        $date_active = $now->modify('-15 days')->format('Y-m-d'); //15日間投稿がなかったら非アクティブユーザーと判定する
                         //アクティブ化どうかチェックする
                         foreach($obj as $key => $val){
                             $date_tl = $val->created_at;
@@ -4886,8 +4922,8 @@ EOT;
     **/
     public function checkFriendship($usernameArray)
     {
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : '';
-        $screen_name = !empty($_SESSION['active_user']) ? $_SESSION['active_user'] : '';        
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');
         Log::debug('$u_id:'.print_r($u_id,true));
         Log::debug('$acrive_user:'.print_r($screen_name,true));
 
@@ -4897,7 +4933,7 @@ EOT;
             $usernameArray_pick[]=$val;            
         }
 
-        if(isset($u_id) && isset($screen_name)){
+        if($u_id !== null && $screen_name !== null){
             
             $u_info = Db::get_userInfo($u_id, $screen_name);
             Log::debug('$u_info:'.print_r($u_info,true));
@@ -5190,7 +5226,7 @@ EOT;
                 }
             }
 
-            if(!preg_match( "/[ぁ-ん]+|[ァ-ヴー]+/u", $str)){
+            if(!preg_match( "/[ぁ-ん]+|[ァ-ヴー]+/u", $text)){
                 //日本語が含まれていない場合は、falseを返す
                 //$result_notをtrueにしてreturn falseになるようにする
                 $result_not=true;
@@ -5235,9 +5271,9 @@ EOT;
         Log::debug('MAILTYPE::FINISH_AUTOFOLLOW:'.print_r(MAILTYPE::FINISH_AUTOFOLLOW,true));
         Log::debug('MAILTYPE::FINISH_AUTOFOLLOW:'.print_r(MAILTYPE::FINISH_AUTOLIKE,true));
         //ユーザーID取得
-        $u_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : false;
+        $u_id = Session::get('user_id');
         Log::debug('$u_id:'.print_r($u_id,true));
-        if($u_id){
+        if($u_id !== null){
             try{
             //メールアドレスを取得する
             $mailtoArray = Db::get_email($u_id);
