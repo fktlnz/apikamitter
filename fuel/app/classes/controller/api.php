@@ -1637,7 +1637,7 @@ EOT;
 
                 Log::debug('$followResult_Collection:'.print_r($followResult_Collection,true));
 
-                if(!empty($_SESSION["next_cursor"]) && $_SESSION["next_cursor"]==0 && $IsFinishedAllAccount ){
+                if(isset($_SESSION["next_cursor"]) && $_SESSION["next_cursor"]==0 && $IsFinishedAllAccount ){
                     //ターゲットアカウントのフォロワー次ページがない＋アカウントすべてのループが完了している
                     if(!empty($_SESSION["next_cursor"])){
                         unset($_SESSION["next_cursor"]);
