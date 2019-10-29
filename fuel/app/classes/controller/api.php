@@ -1467,7 +1467,7 @@ EOT;
                                                 array_push($follower_list, $val->screen_name);
                                             }
                                         }else{
-                                            Log::debug('すでにアンフォロー済です'.print_r($val->screen_name,true));
+                                            Log::debug('すでにフォロー済です'.print_r($val->screen_name,true));
                                         }        
                                     }else{
                                         Log::debug('すでにフォロー済です'.print_r($val->screen_name,true));
@@ -1529,7 +1529,6 @@ EOT;
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
                             Session::set("follower_list", $follower_list);
                             Session::set("follower_list_skip_num", $follower_list_skip_num);
-                            // $_SESSION['skip_num'] = $key_num;
                             Session::set('skip_num',$key_num);
 
                             //メール配信（フォローリミット）
@@ -1566,7 +1565,8 @@ EOT;
                             //次回続きから取得できるようにセッションにページ情報を格納しておく
                             // $_SESSION['skip_num'] = $key_num;
                             Session::set('skip_num',$key_num);
-                            
+                            Session::delete("follower_list");
+                            Session::delete("follower_list_skip_num");
 
                             //メール配信（フォロワー取得リミット）
                             if(Session::get('mail_status') === '1'){
@@ -1581,17 +1581,29 @@ EOT;
                             ));
 
                         }
-
-                        //全フォロワーの取得に成功した場合
-                        //中断から再開するために保持していたセッション変数をリセットする
-                        if(Session::get('next_cursor') !== null || Session::get('skip_num') !== null || Session::get('follower_list') !== null || Session::get('follower_list_skip_num') !== null ){
+                        
+                        if($_SESSION["next_cursor"] == 0 ){
+                            //1アカウントのフォロワーすべての取得が完了したら
+                            //中断から再開するために保持していたセッション変数をリセットする
+                            Log::debug('1ターゲットアカウントのフォロワー取得が完了しました');    
                             Log::debug('フォロー再開用セッション変数をリセットします');    
                             //Session::delete("next_cursor");
                             //Session::delete("skip_num");
                             Session::delete("follower_list");
                             Session::delete("follower_list_skip_num");
                             Log::debug('フォロー再開用セッション変数をリセットしました');                             
-                        }   
+                        }else{
+                            Log::debug('前回取得したフォロワーリストのフォローが完了しました');    
+                            Log::debug('フォロー再開用セッション変数をリセットします');    
+                            Session::delete("follower_list");
+                            Session::delete("follower_list_skip_num");
+                            Log::debug('フォロー再開用セッション変数をリセットしました');   
+                            return $this->response(array(
+                               'res' => 'LIMIT',
+                               'msg' => '15分後、フォロー再開します！!',
+                               'rst' => $followResult_Collection //$followResult_Collection_mergedにするとフロントかえってきたときにIDが重複するためとりあえずこっち
+                            ));
+                        } 
                         
                         //全てのターゲットアカウントのチェックが完了したか
                         if(count($target_account) <= $key_num+1){
