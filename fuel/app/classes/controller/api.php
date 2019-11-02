@@ -696,7 +696,7 @@ EOT;
         $screen_name = Db::get_screenName($u_id);
         if(count($screen_name) > 0){
             //認証済みアカウントが存在する場合
-            if(Session::get('active_user')){
+            if(Session::get('active_user') === null){
                 //初回アクセス時に入る。取得したscreen_nameの最初のアカウントをactive_userとする
                 Session::set('active_user', $screen_name[count($screen_name)-1]['screen_name']);
                 // $_SESSION['active_user'] = $screen_name[count($screen_name)-1]['screen_name'];
@@ -2722,7 +2722,8 @@ EOT;
                 unset($_SESSION["next_cursor_unf"]);
             }
         }
-
+        Log::debug('screen_name'.$screen_name);
+        Log::debug('u_id'.$u_id);
         if($u_id !== null && $screen_name !== null){
 
             $u_info = Db::get_userInfo($u_id, $screen_name);
