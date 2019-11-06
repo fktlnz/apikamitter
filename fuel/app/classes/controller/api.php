@@ -155,17 +155,16 @@ class Controller_Api extends Controller_Rest
                         Log::debug('ログイン処理成功した。ユーザーID:'.Auth::get('id'));
 
                         // セッションにユーザーIDを格納
-                        if(!Session::get('user_id')){
+                        if(Session::get('user_id') === null){
                             Log::debug('セッションをスタートします！！１');
                             session_start();        
+                            session_regenerate_id( true );
                         }
-                        session_regenerate_id( true );
                         // $_SESSION["user_id"] = Auth::get('id');
                         Session::set('user_id', Auth::get('id'));
-
                         Session::set("unfollow_type", true);//アンフォローするとき、非アクティブユーザーのフォロー解除するか、フォローバックしていないユーザーをフォロー解除するか
                         Session::set("mail_status", '0');//デフォルトはメール配信しない、とする
-
+                        
                         $json['res']='OK';
                         return $this->response($json);
                     }else{
@@ -258,7 +257,7 @@ EOT;
                 Session::set('auth_key_limit', time()+(60*30));//認証コードの有効時間を30分とする
                 return $this->response(array(
                     'res' => 'OK',
-                    'msg' => '送信完了しました。認証キーを確認してください。',
+                    'msg' => '認証キーを送信しました。認証キーを入力してください。',
                     'rst' => true
                 ));            
             }else{
@@ -355,7 +354,7 @@ EOT;
             Session::delete('auth_key_limit');
             return $this->response(array(
                 'res' => 'OK',
-                'msg' => '発行完了しました。ログインしてください。',
+                'msg' => '再発行パスワードをメールアドレスに送信しました。ログインに進んでください。',
                 'rst' => true
             ));
         }else{
@@ -395,7 +394,7 @@ EOT;
     **/
     public function get_certify()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！２');
             session_start();        
         }       
@@ -694,16 +693,17 @@ EOT;
     **/
     public function get_getaccount()
     {
-        if(!Session::get('user_id')){
+        Log::debug('Session::get("user_id"):'.print_r(Session::get('user_id'),true));
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
-        $u_id = Session::get('user_id');;
+        $u_id = Session::get('user_id');
         // $u_id = $_SESSION["user_id"];
         
         Log::debug('Userid:'.print_r($u_id,true));
         $screen_name = Db::get_screenName($u_id);
-        if(count($screen_name) > 0){
+        if($screen_name !== false && count($screen_name) > 0){
             //認証済みアカウントが存在する場合
             if(Session::get('active_user') === null){
                 //初回アクセス時に入る。取得したscreen_nameの最初のアカウントをactive_userとする
@@ -748,11 +748,11 @@ EOT;
         //             'rst' => null               
         //         ));
         // }
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
-        $username = Session::get('active_user');;
+        $username = Session::get('active_user');
         // $username = $_SESSION['active_user'];
         $twitter_profile = $this->getTwitterProfile($username);        
 
@@ -765,7 +765,7 @@ EOT;
                 return $this->response(array(
                     'res' => 'OK',
                     'msg' => $twitter_profile['msg'],
-                    'rst' => $twitter_profile['rst']                
+                    'rst' => $twitter_profile['rst']
                 ));
     
             }else {
@@ -773,7 +773,7 @@ EOT;
                 return $this->response(array(
                     'res' => 'NG',
                     'msg' => $twitter_profile['msg'],
-                    'rst' => $twitter_profile['rst']               
+                    'rst' => $twitter_profile['rst']
                 ));
                 
             }
@@ -792,7 +792,7 @@ EOT;
     **/
     public function get_deleteaccount()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -841,7 +841,7 @@ EOT;
     **/
     public function get_getuserinfo()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -923,7 +923,7 @@ EOT;
     **/
     public function get_getactiveuser()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -972,7 +972,7 @@ EOT;
     **/
     public function get_savetweetschedule()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1037,7 +1037,7 @@ EOT;
     **/
     public function get_gettweetschedule()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1134,7 +1134,7 @@ EOT;
     **/
     public function get_getlikedlistsession()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1170,7 +1170,7 @@ EOT;
     **/
     public function get_getfollowedlist()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1231,7 +1231,7 @@ EOT;
     **/
     public function get_getunfollowedlist()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1296,7 +1296,7 @@ EOT;
    
     public function get_startautolike()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1408,7 +1408,7 @@ EOT;
    
     public function get_startautofollow()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1752,7 +1752,7 @@ EOT;
     **/
     public function post_savekeyword()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1827,7 +1827,7 @@ EOT;
     **/
     public function get_getkeyword()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -1929,7 +1929,7 @@ EOT;
     **/
     public function post_saveuseraccount()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -2002,7 +2002,7 @@ EOT;
     **/
     public function get_getuseraccount()
     {        
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -2144,7 +2144,7 @@ EOT;
    
     public function get_startautounfollow()
     {   
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -2583,7 +2583,7 @@ EOT;
     **/
     public function get_changemailstatus()
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -2633,7 +2633,7 @@ EOT;
     **/
     public function tweet($text)
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
@@ -3454,7 +3454,7 @@ EOT;
     **/
     public function checkUserAccountExist($username)
     {
-        if(!Session::get('user_id')){
+        if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
