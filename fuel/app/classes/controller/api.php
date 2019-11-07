@@ -393,11 +393,8 @@ EOT;
      * @return $json
     **/
     public function get_certify()
-    {
-        if(Session::get('user_id') === null){
-            Log::debug('セッションをスタートします！！２');
-            session_start();        
-        }       
+    {           
+        session_start();        
         //設定項目
         $api_key = "PL2EEcGoYzjCRcfY8TA48wE1n"; //API Key
         $api_secret="o69dKBhGCNChijJM029NB30T2hp6zQXKpCZsYul6kAnMLlNGLA"; //API Secret
