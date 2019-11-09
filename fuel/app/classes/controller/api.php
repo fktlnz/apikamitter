@@ -198,6 +198,59 @@ class Controller_Api extends Controller_Rest
     }
 
     /**
+     * ログインしているユーザーの情報（usersテーブル）を取得する
+     * 登録情報編集画面用
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function get_getloginuserinfo()
+    {
+        if(Session::get('user_id') === null){
+            Log::debug('セッションをスタートします！！');
+            session_start();        
+        }
+        $u_id = Session::get('user_id');
+        Log::debug('$u_id:'.$u_id);
+
+        if($u_id !== null){           
+            $username = Db::get_username($u_id);
+            $email = Db::get_email($u_id);
+            if($username !== false && $email !== false){
+
+                $rst = array(
+                    'username' => $username[0]['username'],
+                    'email' => $email[0]['email']
+                );
+                Log::debug('$rst:'.print_r($rst, true));
+                return $this->response(array(
+                    'res' => 'OK',
+                    'msg' => 'ユーザー情報の取得に成功',
+                    'rst' => $rst,                
+                ));
+    
+            }else {
+    
+                return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'ユーザー情報の取得に失敗。ネットワークをご確認ください。',
+                    'active_user' => Session::get('active_user'),
+                    'rst' => false,                
+                ));
+                
+            }
+        }else {
+
+            return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'アカウントの削除に失敗しました。ネットワークを確認してください。',
+                    'rst' => false,                
+                ));
+
+        }
+    }
+
+    /**
      * （パスワードリマインダー）認証キーを送信する
      * 
      * @param none

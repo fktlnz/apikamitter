@@ -64,9 +64,19 @@ class Db extends \Model
             ))->execute()->as_array();
         }catch(Exception $e) {
             return false;
-        }
-        
-        
+        }        
+    }
+    // ユーザー名を取得する
+    public static function get_username($u_id=null)
+    {
+        try{
+            return $query = \DB::select('username')->from('users')->where(array(
+                'id' => $u_id,
+                'delete_flg' => 0
+            ))->execute()->as_array();
+        }catch(Exception $e) {
+            return false;
+        }        
     }
 
     public static function delete_account($u_id, $screen_name)
