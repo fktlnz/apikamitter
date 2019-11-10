@@ -69,7 +69,7 @@ class Controller_Api extends Controller_Rest
         if(Input::method() =='POST'){
             $validate = $signupform->validation();
             if($validate->run()){                
-                //パスワードの一致を確認する（ここにいれるのでいいか。。？）
+                //パスワードの一致を確認する
                 if(Input::post('re_pass') !== Input::post('password')) {
                     $json['error']=array(
                         're_pass' => '『パスワード再入力』は『パスワード』と一致していません。',
@@ -251,6 +251,105 @@ class Controller_Api extends Controller_Rest
     }
 
     /**
+     * ログインしているユーザーの情報（usersテーブル）を変更する
+     * 登録情報編集画面用
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function post_changeloginuserinfo()
+    {
+        if(Session::get('user_id') === null){
+            Log::debug('セッションをスタートします！！');
+            session_start();        
+        }
+        $u_id = Session::get('user_id');
+        $email_new = Input::post('email');
+        Log::debug('$u_id:'.$u_id);
+
+        if($u_id !== null && $email_new !== null){           
+            $username = Db::get_username($u_id);
+            $rst = Auth::update_user(
+                array(
+                    'email'        => $email_new  // 新しいメールアドレスを設定する
+                ),
+                $username
+            );
+
+            if($rst !== false){                
+                return $this->response(array(
+                    'res' => 'OK',
+                    'msg' => 'ユーザー情報を変更しました',
+                    'rst' => $rst               
+                ));
+    
+            }else {    
+                return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'ユーザー情報の変更に失敗。ネットワークをご確認ください。',
+                    'rst' => $rst          
+                ));
+                
+            }
+        }else {
+
+            return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'ユーザー情報の変更に失敗しました。ネットワークを確認してください。',
+                    'rst' => false,                
+                ));
+
+        }
+    }
+
+    /**
+     * パスワードを変更する
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function post_changepassword()
+    {
+        if(Session::get('user_id') === null){
+            Log::debug('セッションをスタートします！！');
+            session_start();        
+        }
+        $u_id = Session::get('user_id');
+        $pass_old = Input::post('password_old');
+        $pass_new = Input::post('password_new');
+        Log::debug('$u_id:'.$u_id);
+
+        if($u_id !== null && $pass_old !== null && $pass_new !== null){           
+            $username = Db::get_username($u_id);
+            $rst = Auth::change_password($pass_old,$pass_new, $username);           
+
+            if($rst !== false){                
+                return $this->response(array(
+                    'res' => 'OK',
+                    'msg' => 'パスワードを変更しました！',
+                    'rst' => $rst               
+                ));
+    
+            }else {    
+                return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'パスワードが間違っています！',
+                    'rst' => $rst          
+                ));
+                
+            }
+        }else {
+
+            return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'パスワードの変更に失敗しました。ネットワークを確認してください。',
+                    'rst' => false,                
+                ));
+
+        }
+    }
+
+    /**
      * （パスワードリマインダー）認証キーを送信する
      * 
      * @param none
@@ -380,6 +479,7 @@ EOT;
         $content = <<<EOT
 本メールアドレス宛にパスワードの再発行を致しました。
 下記のURLにて再発行パスワードをご入力頂き、ログインください。
+ログイン後、パスワードを変更してください。
 
 再発行パスワード：{$update_pass}
 
