@@ -263,43 +263,61 @@ class Controller_Api extends Controller_Rest
             Log::debug('セッションをスタートします！！');
             session_start();        
         }
-        $u_id = Session::get('user_id');
-        $email_new = Input::post('email');
-        Log::debug('$u_id:'.$u_id);
 
-        if($u_id !== null && $email_new !== null){           
-            $username = Db::get_username($u_id);
-            $rst = Auth::update_user(
-                array(
-                    'email'        => $email_new  // 新しいメールアドレスを設定する
-                ),
-                $username
-            );
+        $validate = Validation::forge('changeinfo');
+        $validate->add_field('email', '新しいEmail', 'required|max_length[255]|valid_emails');
+        
+        if(Input::method() =='POST'){
+            if($validate->run()){
+                $u_id = Session::get('user_id');
+                $email_new = Input::post('email');
+                if($u_id !== null && $email_new !== null){           
+                    $username = Db::get_username($u_id);
+                    $rst = Auth::update_user(
+                        array(
+                            'email'        => $email_new  // 新しいメールアドレスを設定する
+                        ),
+                        $username
+                    );
 
-            if($rst !== false){                
-                return $this->response(array(
-                    'res' => 'OK',
-                    'msg' => 'ユーザー情報を変更しました',
-                    'rst' => $rst               
-                ));
-    
-            }else {    
-                return $this->response(array(
-                    'res' => 'NG',
-                    'msg' => 'ユーザー情報の変更に失敗。ネットワークをご確認ください。',
-                    'rst' => $rst          
-                ));
-                
+                    if($rst !== false){                
+                        return $this->response(array(
+                            'res' => 'OK',
+                            'msg' => 'ユーザー情報を変更しました',
+                            'rst' => $rst               
+                        ));
+            
+                    }else {    
+                        return $this->response(array(
+                            'res' => 'NG',
+                            'msg' => '登録に失敗しました。emailの書式をご確認ください。',
+                            'rst' => $rst          
+                        ));
+                        
+                    }
+                }else {
+
+                    return $this->response(array(
+                            'res' => 'NG',
+                            'msg' => '登録に失敗しました。emailの書式をご確認ください。',
+                            'rst' => false,                
+                        ));
+
+                }
+
+            }else{
+                $errors = $validate->error();
+                foreach( $errors as $field => $error )
+                {
+                    $json['error'][$field] = $error->get_message();
+                }
+                Log::debug('バリデーションに失敗しました:'.print_r($json, true));
+
+                return $this->response($json);
             }
-        }else {
-
-            return $this->response(array(
-                    'res' => 'NG',
-                    'msg' => 'ユーザー情報の変更に失敗しました。ネットワークを確認してください。',
-                    'rst' => false,                
-                ));
-
         }
+
+        
     }
 
     /**
@@ -313,40 +331,73 @@ class Controller_Api extends Controller_Rest
         if(Session::get('user_id') === null){
             Log::debug('セッションをスタートします！！');
             session_start();        
-        }
-        $u_id = Session::get('user_id');
-        $pass_old = Input::post('password_old');
-        $pass_new = Input::post('password_new');
-        Log::debug('$u_id:'.$u_id);
+        }        
 
-        if($u_id !== null && $pass_old !== null && $pass_new !== null){           
-            $username = Db::get_username($u_id);
-            $rst = Auth::change_password($pass_old,$pass_new, $username);           
+        $validate = Validation::forge('changepassword');
+        $validate->add('password_old', '現在のパスワード')->add_rule('required')->add_rule('min_length', 6)->add_rule('max_length', 255)->add_rule('match_pattern','/^[a-zA-Z0-9]+$/', "半角英数字");
+        $validate->add('password_new', '新しいパスワード')->add_rule('required')->add_rule('min_length', 6)->add_rule('max_length', 255)->add_rule('match_pattern','/^[a-zA-Z0-9]+$/', "半角英数字");
+        
+        if(Input::method() =='POST'){
+            if($validate->run()){
+                $u_id = Session::get('user_id');
+                $pass_new = Input::post('password_new');
+                $re_pass_new = Input::post('re_password_new');
+                Log::debug('$u_id:'.$u_id);
+                if($re_pass_new !== $pass_new) {
+                    $json["res"] = 'NG';
+                    $json['error']=array(
+                        're_pass' => '『新しいパスワード（確認）』に『新しいパスワード』と同じ値を入力してください。',
+                    );
+                    return $this->response($json);
+                }
 
-            if($rst !== false){                
-                return $this->response(array(
-                    'res' => 'OK',
-                    'msg' => 'パスワードを変更しました！',
-                    'rst' => $rst               
-                ));
-    
-            }else {    
-                return $this->response(array(
-                    'res' => 'NG',
-                    'msg' => 'パスワードが間違っています！',
-                    'rst' => $rst          
-                ));
-                
+                $pass_old = Input::post('password_old');
+
+                if($u_id !== null && $pass_old !== null && $pass_new !== null){           
+                    $username = Db::get_username($u_id);
+                    $rst = Auth::change_password($pass_old, $pass_new, $username);           
+
+                    if($rst !== false){                
+                        return $this->response(array(
+                            'res' => 'OK',
+                            'msg' => 'パスワードを変更しました！',
+                            'rst' => $rst               
+                        ));
+            
+                    }else {    
+                        return $this->response(array(
+                            'res' => 'NG',
+                            'error' => array(
+                                'pass' => '現在のパスワードが間違っています！'
+                            ),
+                            'rst' => $rst          
+                        ));
+                        
+                    }
+                }else {
+
+                    return $this->response(array(
+                            'res' => 'NG',
+                            'msg' => 'パスワードの変更に失敗しました。ネットワークを確認してください。',
+                            'rst' => false,                
+                        ));
+
+                }
+
+
+            }else{
+                $errors = $validate->error();
+                foreach( $errors as $field => $error )
+                {
+                    $json['error'][$field] = $error->get_message();
+                }
+                Log::debug('バリデーションに失敗しました:'.print_r($json, true));
+
+                return $this->response($json);
             }
-        }else {
-
-            return $this->response(array(
-                    'res' => 'NG',
-                    'msg' => 'パスワードの変更に失敗しました。ネットワークを確認してください。',
-                    'rst' => false,                
-                ));
-
         }
+
+        
     }
 
     /**
@@ -1140,7 +1191,7 @@ EOT;
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
-                Log::debug('u_info:'.print_r($u_info,true));
+                Log::debug('u_info1:'.print_r($u_info,true));
                 $data = array();
                 $data['id'] = $id;
                 $data['account_id'] = $u_info[0]['id'];
@@ -1198,7 +1249,7 @@ EOT;
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
-                Log::debug('u_info:'.print_r($u_info,true));
+                Log::debug('u_info2:'.print_r($u_info,true));
                 $rst = Db::get_tweetschedule($u_info[0]['id']);
 
                 if($rst){
@@ -1331,7 +1382,7 @@ EOT;
             try{                
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
-                Log::debug('u_info:'.print_r($u_info,true));
+                Log::debug('u_info3:'.print_r($u_info,true));
                 $account_id = $u_info[0]['id'];
 
                 //DBからフォロー済アカウントを取得する
@@ -1392,7 +1443,7 @@ EOT;
             try{                
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
-                Log::debug('u_info:'.print_r($u_info,true));
+                Log::debug('u_info4:'.print_r($u_info,true));
                 $account_id = $u_info[0]['id'];
 
                 //DBからフォロー済アカウントを取得する
@@ -1458,7 +1509,7 @@ EOT;
                 
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
-                Log::debug('u_info:'.print_r($u_info,true));
+                Log::debug('u_info5:'.print_r($u_info,true));
                 $account_id = $u_info[0]['id'];
 
                 //likeキーワードを取得し、登録がない場合はエラー
