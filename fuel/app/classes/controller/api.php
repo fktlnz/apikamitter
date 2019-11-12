@@ -742,6 +742,18 @@ EOT;
                 $post->set($data);
                 $post->save();
 
+                //idを取得する
+                $id_new = $post->id;
+                Log::debug('$id_new:'.print_r($id_new,true));
+
+                //設定テーブルを作成する
+                $rst_cfg = $this->makeAccountConfig($id_new);
+                if($rst_cfg) {
+                    $json['res']='NG';
+                    $json['msg']='認証に失敗しました。アカウントを一度削除し、ネットワークをご確認後に再度実施下さい。';
+                    return $this->response($json);
+                }
+
                  $json['res']='OK';
                  $json['msg']='アカウントを認証しました！';
                  $json['screen_name']=$query['screen_name'];
@@ -1001,11 +1013,17 @@ EOT;
         // $u_id = $_SESSION["user_id"];
         $screen_name = Input::get('screen_name');
 
-        if($u_id !== null && $screen_name !== null){
-
+        if($u_id !== null && $screen_name !== null){            
             Log::debug('Userid@deleteaccount:'.print_r($u_id,true));
             $rst = Db::delete_account($u_id, $screen_name);
             Log::debug('delete_accountの結果:'.print_r($rst,true));
+
+            //アカウント情報を取得する(idを使う)
+            $u_info = Db::get_userInfo($u_id, $screen_name); 
+            $account_id = $u_info[0]['id'];
+            //設定レコードを削除する
+            $rst_deletecfg = Db::delete_accountConfig($account_id);
+
             if($rst){
     
                 return $this->response(array(
@@ -1191,7 +1209,7 @@ EOT;
             try{
                 //アカウント情報を取得する(idを使う)
                 $u_info = Db::get_userInfo($u_id, $screen_name); 
-                Log::debug('u_info1:'.print_r($u_info,true));
+                Log::debug('u_info:'.print_r($u_info,true));
                 $data = array();
                 $data['id'] = $id;
                 $data['account_id'] = $u_info[0]['id'];
@@ -1900,7 +1918,7 @@ EOT;
                         unset($_SESSION["next_cursor"]);
                     }
                     Session::delete("skip_num");
-                   
+                   Log::debug('自動フォロー完了！');
                     //自動フォロー完了メール
                     if(Session::get('mail_status') === '1'){
                         $this->mailTo(MAILTYPE::FINISH_AUTOFOLLOW);
@@ -2366,8 +2384,10 @@ EOT;
 
                 //=====現在フォローしているアカウントを抽出する=======//
 
-                //フォロー済アカウントを取得（フォローから7日以上経過しているアカウントのみを対象とする）
-                $AlreadyFollowList_pure_array = $this->getUseraccountArray($account_id, 1, 7, false);//type 1:フォロー済アカウント
+                //フォロー済アカウントを取得（フォローから何日経過しているアカウントを対象とするかは設定値で決まる）
+                $cfg = Db::get_accountConfig($account_id);
+                $dayafterfollow = $cfg[0]['dayafterfollow_unfollow'];
+                $AlreadyFollowList_pure_array = $this->getUseraccountArray($account_id, 1, $dayafterfollow, false);//type 1:フォロー済アカウント
                 Log::debug('AlreadyFollowList_pure_array:'.print_r($AlreadyFollowList_pure_array,true));
 
 
@@ -2393,6 +2413,13 @@ EOT;
                     'rst' => null
                 );
 
+                //非アクティブ日数を取得
+                //この日数以上ツイートしていないユーザーを非アクティブと判定する
+                $cfg = Db::get_accountConfig($account_id);
+                $nonactiveDay = $cfg[0]['nonactiveday_unfollow'];
+                $nonactiveDay = '-'.$nonactiveDay.' days';
+                Log::debug('nonactiveDay:'.print_r($nonactiveDay, true));
+
                 if(Session::get("unfollow_type")===true || Session::get("unfollow_type")===null){
                     //前回途中で終わっている場合は、前回の結果を格納する
                     if(Session::get('UnFollowPotentialList') !== null){
@@ -2411,7 +2438,7 @@ EOT;
                         }
                         
                         Log::debug('アクティブユーザーかチェックします:'.print_r($val,true));
-                        $IsActive = $this->checkIfActiveuser($val);//アクティブユーザー（15日以内に投稿履歴がある） レートリミット：900/15min
+                        $IsActive = $this->checkIfActiveuser($val, $nonactiveDay);//アクティブユーザー（15日以内に投稿履歴がある） レートリミット：900/15min
                         if($IsActive["rst"] === false){
                             Log::debug('このアカウントをアンフォローします:'.print_r($val,true));
                             //フォロワーじゃなくて、非アクティブユーザーの場合はアンフォローする
@@ -2542,7 +2569,17 @@ EOT;
                         'rst' => null
                     );
 ////////////////////４．Friendship_rst["rst"]=$objのなかから、フォローバックしていないアカウントを抽出する(途中から再開する場合はスキップ)
+                    
                     if(Session::get('UnFollowPotentialList') === null){
+                        //フォローリストが空の場合はフロントに返す
+                        if(count($AlreadyFollowList_pure_array) == 0){
+                            return $this->response(array(
+                                'res' => 'OK',
+                                'msg' => 'フォロー解除対象がありませんでした。15分後再開します！',
+                                'rst' => array() //空を返す 
+                            ));
+                        }
+
                         //フォロー済アカウントのフレンドシップ状況（フォローバック状況）を確認
                         $Friendship_rst = $this->checkFriendship($AlreadyFollowList_pure_array);
                         //↓$Friendship_rst↓
@@ -2727,7 +2764,198 @@ EOT;
 
             
 
+    }    
+
+    /**
+     * フォロー解除の設定を変更する
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function post_changeaccountconfig()
+    {
+        if(Session::get('user_id') === null){
+            Log::debug('セッションをスタートします！！');
+            session_start();        
+        }        
+
+        $validate = Validation::forge('changeconfig');
+        $validate->add('nonactiveday_unfollow', '非アクティブ日数')->add_rule('required')->add_rule('numeric_min', 1)->add_rule('numeric_max', 999)->add_rule('match_pattern','/^[0-9]+$/', "半角数字");
+        $validate->add('dayafterfollow_unfollow', 'フォロー経過日数')->add_rule('required')->add_rule('numeric_min', 0)->add_rule('numeric_max', 999)->add_rule('match_pattern','/^[0-9]+$/', "半角数字");
+        $validate->add('friends_unfollow', '動作開始フォロー数')->add_rule('required')->add_rule('numeric_min', 100)->add_rule('numeric_max', 10000)->add_rule('match_pattern','/^[0-9]+$/', "半角数字");
+        
+        if(Input::method() =='POST'){
+            if($validate->run()){
+                $u_id = Session::get('user_id');
+                $screen_name = Session::get('active_user');       
+                $nonactiveday_unfollow = Input::post('nonactiveday_unfollow');
+                $friends_unfollow = Input::post('friends_unfollow');
+                $dayafterfollow_unfollow = Input::post('dayafterfollow_unfollow');
+                Log::debug('$u_id:'.$u_id);
+                
+
+                if($u_id !== null && $screen_name !== null && $nonactiveday_unfollow !== null && $friends_unfollow !== null && $dayafterfollow_unfollow !== null){
+
+                    //アカウント情報を取得する(idを使う)
+                    $u_info = Db::get_userInfo($u_id, $screen_name); 
+                    Log::debug('u_info:'.print_r($u_info,true));
+                    $account_id = $u_info[0]['id'];
+
+                    $rst = Db::update_accountConfig($account_id, $nonactiveday_unfollow, $friends_unfollow, $dayafterfollow_unfollow);           
+
+                    if($rst !== false){                
+                        return $this->response(array(
+                            'res' => 'OK',
+                            'msg' => '設定を変更しました！',
+                            'rst' => $rst               
+                        ));
+            
+                    }else {    
+                        return $this->response(array(
+                            'res' => 'NG',
+                            'error' => array(
+                                'pass' => '設定が変更できませんでした。ネットワークを確認後再度お試しください！'
+                            ),
+                            'rst' => $rst          
+                        ));
+                        
+                    }
+                }else {
+
+                    return $this->response(array(
+                            'res' => 'NG',
+                            'msg' => '設定が変更できませんでした。ネットワークを確認後再度お試しください！',
+                            'rst' => false,                
+                        ));
+
+                }
+
+
+            }else{
+                $errors = $validate->error();
+                foreach( $errors as $field => $error )
+                {
+                    $json['error'][$field] = $error->get_message();
+                }
+                Log::debug('バリデーションに失敗しました:'.print_r($json, true));
+
+                return $this->response($json);
+            }
+        }
+
+        
     }
+
+    /**
+     * アカウントをDBから取得してフロントに戻す
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function get_getaccountconfig()
+    {        
+        if(Session::get('user_id') === null){
+            Log::debug('セッションをスタートします！！');
+            session_start();        
+        }
+        $u_id = Session::get('user_id');
+        $screen_name = Session::get('active_user');       
+        if($u_id !== null && $screen_name !== null){   
+            try{
+                //アカウント情報を取得する(idを使う)
+                $u_info = Db::get_userInfo($u_id, $screen_name); 
+                $account_id = $u_info[0]['id'];
+
+                $accountconfig = Db::get_accountConfig($account_id);
+
+                if($accountconfig){
+                    return $this->response(array(
+                        'res' => 'OK',
+                        'msg' => 'フォロー解除の設定値を取得しました',
+                        'rst' => $accountconfig[0]
+                    ));
+                }else{
+                    return $this->response(array(
+                        'res' => 'OK',
+                        'msg' => 'サーバーエラーです。管理者に問い合わせてください。',
+                        'rst' => false
+                    ));
+                }
+
+            }catch(Exception $e) {
+                return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => $e->getMessage(),
+                    'rst' => null
+                ));
+            }
+            
+            
+        }else {
+            return $this->response(array(
+                    'res' => 'NG',
+                    'msg' => 'アプリケーションエラーです。管理者に問い合わせてください',
+                    'rst' => null
+                ));
+        }
+
+    }
+
+    /**
+     * $account_idの設定レコードを作成する
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function makeAccountConfig($account_id)
+    {
+        if(isset($account_id)){   
+
+            try{
+                //$account_idの設定レコードを作成する
+                $rst = Db::make_accountConfig($account_id); 
+
+                if($rst){
+                    return true;
+                }else{
+                    return false;
+                }
+
+            }catch(Exception $e) {
+                return false;
+            }
+            
+            
+        }else {
+            return false;
+        }
+
+    }
+
+    /**
+     * $account_idの設定レコードを論理削除する
+     * 
+     * @param none
+     * @return　json
+    **/
+    public function deleteAccountConfig($account_id)
+    {
+
+        if(isset($account_id)){
+
+            $rst = Db::delete_accountConfig($account_id);
+            Log::debug('delete_accountの結果:'.print_r($rst,true));
+            if($rst){    
+                return true;    
+            }else {    
+                return false;
+                
+            }
+        }else {
+            return false;
+        }
+    }
+    
 
 
     /* ================================
@@ -4071,7 +4299,7 @@ EOT;
                     return array(
                         'res' => 'NG',
                         'msg' => 'なにかしらのエラーが発生しました',
-                        'rst' => null
+                        'rst' => false
                     );
                 }
                 
@@ -4966,10 +5194,10 @@ EOT;
     /**
      * $usernameが非アクティブユーザーかどうかをチェックする（非アクティブユーザー⇒15日間投稿なし）
      * 
-     * @param $username アカウントID
+     * @param $username アカウントID  $day: この日数ツイートしていないユーザーを非アクティブユーザーと判定する（'-15 days'）のように指定する
      * @return　アクティブ：true 　非アクティブ：false 判定できなかった:null
     **/
-    public function checkIfActiveuser($username)
+    public function checkIfActiveuser($username, $day)
     {        
         $u_id = Session::get('user_id');
         $screen_name = Session::get('active_user');
@@ -5107,7 +5335,7 @@ EOT;
                     if(empty($obj->errors)){
                         $now=new \DateTime();
                         $now_format = $now->format('Y-m-d');
-                        $date_active = $now->modify('-15 days')->format('Y-m-d'); //15日間投稿がなかったら非アクティブユーザーと判定する
+                        $date_active = $now->modify($day)->format('Y-m-d'); //15日間投稿がなかったら非アクティブユーザーと判定する                        
                         //アクティブ化どうかチェックする
                         foreach($obj as $key => $val){
                             $date_tl = $val->created_at;
@@ -5332,7 +5560,7 @@ EOT;
             $obj = json_decode( $json );
           
             $obj_header = $this->header_decode($header);
-            Log::debug('$obj@checkIfActiveuser');
+            Log::debug('$obj@Friendship');
             // Log::debug('$obj@checkIfActiveuser =>:'.print_r($obj,true));
             if($obj){
                 if(empty($obj->error)){ 

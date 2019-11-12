@@ -233,11 +233,52 @@ class Db extends \Model
          return $query = \DB::delete('useraccount')->where(array(
              'id' => $word_id
          ))->execute();
-    }    
-
-    public static function get_votes()
-    {
-         return $query = \DB::select('vote_a', 'vote_b','vote_c','vote_d')->from('vote')->execute()->as_array();         
     }
+
+    /* ==================
+    # 設定
+    ====================*/
+
+    //各myaccount(account_id)における設定テーブルを作成する
+    public static function make_accountConfig($account_id)
+    {
+         return $query = \DB::insert('config')->set(array(             
+             'account_id' => $account_id,
+             ))->execute();
+    }
+
+    //フォロー解除の設定を変更する
+    public static function update_accountConfig($account_id, $nonactiveday, $friends, $dayafterfollow)
+    {
+         return $query = \DB::update('config')->set(array(             
+             'nonactiveday_unfollow' => $nonactiveday,
+             'friends_unfollow' => $friends,
+             'dayafterfollow_unfollow' => $dayafterfollow,
+             ))->where('account_id', $account_id)->execute();
+    }
+
+    //$account_idの設定を取得する
+    public static function get_accountConfig($account_id)
+    {        
+        try{
+            return $query = \DB::select('nonactiveday_unfollow', 'friends_unfollow', 'dayafterfollow_unfollow')->from('config')->where(array(
+                'account_id' => $account_id,
+                'delete_flg' => 0
+            ))->execute()->as_array();
+        }catch(Exception $e) {
+            return false;
+        }
+
+    }
+
+    //$account_idの設定を削除する
+    public static function delete_accountConfig($account_id)
+    {
+         return $query = \DB::update('config')->value('delete_flg', 1)->where(array(
+             'account_id' => $account_id
+         ))->execute();
+    }
+
+    
 
 }
